@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Worker Manager — Kanhaiya Kushwaha</title>
+  <title>Kanhaiya Kushwaha</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
@@ -21,8 +21,8 @@
   <div class="max-w-5xl mx-auto">
 
     <header class="mb-4">
-      <h1 class="text-2xl font-semibold">Worker Manager - Kanhaiya Kushwaha</h1>
-      <p class="text-sm text-gray-600">Daily report of workers.</p>
+      <h1 class="text-2xl font-semibold">Kanhaiya Kushwaha</h1>
+      <p class="text-sm text-gray-600">Daily report of overtime workers</p>
     </header>
 
     <main class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -75,14 +75,14 @@
         <div class="grid grid-cols-[1fr] gap-3 items-start">
           <div id="export-area" class="p-4 rounded border border-gray-400 w-full">
             <div id="logo-area" class="w-full flex justify-center items-center mb-4 min-h-[80px] p-4"></div>
-
+            
             <div class="flex justify-center items-center gap-2 mb-3 exclude-from-export">
               <label for="export-date-input" class="text-sm font-medium">Date:</label>
               <input type="text" id="export-date-input" class="p-1 border rounded text-sm" />
             </div>
             <p id="export-date-display" class="text-sm text-gray-600 text-center mb-3"></p>
 
-            <h2 class="text-lg font-semibold text-center mb-3">Worker Report Sheet</h2>
+            <h2 class="text-lg font-semibold text-center mb-3">Workers Overtime Report</h2>
 
             <div id="selected-list-container" class="overflow-auto max-h-80">
               <table id="selected-table" class="w-full table-auto border-collapse">
@@ -92,7 +92,7 @@
                     <th class="border p-2 text-left">Name</th>
                     <th class="border p-2 text-left">Position</th>
                     <th class="border p-2 text-left">Hours</th>
-                    <th class="border p-2 text-left"> </th> <!-- action column -->
+                    <th class="border p-2 text-left"> </th>
                   </tr>
                 </thead>
                 <tbody></tbody>
@@ -110,7 +110,7 @@
       </section>
     </main>
 
-    <footer class="mt-4 text-xs text-gray-500">Made with ❤️ by Durgesh Kushwaha</footer>
+    <footer class="mt-4 text-xs text-center text-gray-500">Made with ❤️ by Durgesh Kushwaha</footer>
   </div>
 
   <script src="script.js" defer></script>
