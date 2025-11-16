@@ -216,18 +216,133 @@ async function onExportCsv() {
 }
 async function onImportCsv(e) {
   try {
-    const file = e?.target?.files?.[0]; if (!file) return;
-    const text = await file.text(); const lines = text.split(/\r?\n/).filter(l => l.trim() !== ''); if (!lines.length) { setStatus('CSV empty', true); return; }
-    const header = lines.shift().split(',').map(s => s.trim().replace(/^"|"$/g,'')); const idx = { id: header.indexOf('id'), name: header.indexOf('name'), position: header.indexOf('position'), workHours: header.indexOf('workHours') };
-    const workers = await loadWorkers();
-    for (const line of lines) {
-      const values = line.match(/("([^"]|"")*"|[^,]+)/g)?.map(v => v.replace(/^"|"$/g,'').replace(/""/g,'"')) || [];
-      const record = { id: values[idx.id]||'', name: values[idx.name]||'', position: values[idx.position]||'', workHours: values[idx.workHours]||'' };
-      if (record.id && record.name) { const ex = workers.findIndex(w => w.id === record.id); if (ex >= 0) workers[ex] = record; else workers.push(record); }
+    const file = e?.target?.files?.[0];
+    if (!file) { setStatus('No file selected', true); return; }
+
+    setExportButtonsDisabled(true);
+    setStatus('Reading file...');
+
+    // Read as text (UTF-8). If file uses other encoding, this may still work.
+    const text = await file.text();
+
+    if (!text || !text.trim()) { setStatus('CSV file is empty', true); if (e?.target) e.target.value = null; return; }
+
+    // Remove UTF-8 BOM if present
+    const BOM_REGEX = /^\uFEFF/;
+    const cleaned = text.replace(BOM_REGEX, '');
+
+    // Normalise newlines
+    const normalized = cleaned.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+    // Split into lines but keep quoted fields intact — we'll parse each line robustly.
+    const lines = normalized.split('\n').filter(l => l.trim() !== '');
+
+    if (!lines.length) { setStatus('CSV contains no data', true); if (e?.target) e.target.value = null; return; }
+
+    // Detect delimiter by sampling first few lines: prefer comma, else semicolon, else tab
+    function detectDelimiter(sampleLines, candidates = [',',';','\t']) {
+      const scores = {};
+      candidates.forEach(d => scores[d] = 0);
+      const sampleCount = Math.min(sampleLines.length, 5);
+      for (let i=0;i<sampleCount;i++){
+        const ln = sampleLines[i];
+        candidates.forEach(d => {
+          // Rough heuristic: count occurrences outside quotes
+          let count = 0, inQ=false;
+          for (let chIndex=0; chIndex<ln.length; chIndex++){
+            const ch = ln[chIndex];
+            if (ch === '"') { inQ = !inQ; continue; }
+            if (!inQ && ch === d) count++;
+          }
+          scores[d] += count;
+        });
+      }
+      // choose delimiter with highest score (fallback to comma)
+      let best = candidates[0];
+      candidates.forEach(d => { if (scores[d] > scores[best]) best = d; });
+      return best;
     }
-    await saveWorkers(workers); setStatus('CSV imported'); if (e?.target) e.target.value = null;
-  } catch (e) { console.error(e); setStatus('CSV import failed', true); if (e?.target) e.target.value = null; }
+
+    const delimiter = detectDelimiter(lines.slice(0, Math.min(lines.length, 10)));
+    // CSV parser that handles quoted fields and escaped quotes ("")
+    function parseCsvLine(line, delim) {
+      const fields = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') {
+          // if next is also quote, it's an escaped quote
+          if (inQuotes && line[i+1] === '"') {
+            cur += '"';
+            i++; // skip next
+          } else {
+            inQuotes = !inQuotes;
+          }
+          continue;
+        }
+        if (!inQuotes && ch === delim) {
+          fields.push(cur);
+          cur = '';
+          continue;
+        }
+        cur += ch;
+      }
+      fields.push(cur);
+      // Trim surrounding spaces
+      return fields.map(f => f.trim());
+    }
+
+    // First line is header (attempt)
+    const headerLine = lines.shift();
+    const headerCandidates = parseCsvLine(headerLine, delimiter).map(h => h.replace(/^"|"$/g,'').trim().toLowerCase());
+
+    // Map header names to indexes
+    const indexMap = {
+      id: headerCandidates.indexOf('id'),
+      name: headerCandidates.indexOf('name'),
+      position: headerCandidates.indexOf('position'),
+      workHours: headerCandidates.indexOf('workhours') !== -1 ? headerCandidates.indexOf('workhours') : headerCandidates.indexOf('hours')
+    };
+
+    // If header doesn't include expected columns, try heuristic (first 4 columns)
+    if (indexMap.id === -1 || indexMap.name === -1) {
+      // fallback: assume first two columns are id + name
+      indexMap.id = indexMap.id === -1 ? 0 : indexMap.id;
+      indexMap.name = indexMap.name === -1 ? 1 : indexMap.name;
+      if (indexMap.position === -1) indexMap.position = 2;
+      if (indexMap.workHours === -1) indexMap.workHours = 3;
+    }
+
+    const workers = await loadWorkers();
+
+    let added = 0, updated = 0, skipped = 0;
+    for (const rawLine of lines) {
+      if (!rawLine.trim()) continue;
+      const cols = parseCsvLine(rawLine, delimiter).map(c => c.replace(/^"|"$/g,'').trim());
+      const rec = {
+        id: cols[indexMap.id] || '',
+        name: cols[indexMap.name] || '',
+        position: cols[indexMap.position] || '',
+        workHours: cols[indexMap.workHours] || ''
+      };
+      if (!rec.id || !rec.name) { skipped++; continue; }
+      const existingIndex = workers.findIndex(w => w.id === rec.id);
+      if (existingIndex >= 0) { workers[existingIndex] = rec; updated++; } else { workers.push(rec); added++; }
+    }
+
+    await saveWorkers(workers);
+    setStatus(`CSV imported — added: ${added}, updated: ${updated}, skipped: ${skipped}`);
+    if (e?.target) e.target.value = null;
+  } catch (err) {
+    console.error('CSV import error', err);
+    setStatus('CSV import failed: ' + (err && err.message ? err.message : err), true);
+    if (e?.target) e.target.value = null;
+  } finally {
+    setExportButtonsDisabled(false);
+  }
 }
+
 async function onDownloadJson() {
   try { setExportButtonsDisabled(true); const workers = await loadWorkers(); const blob = new Blob([JSON.stringify(workers,null,2)],{type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'workers.json'; a.click(); URL.revokeObjectURL(url); setStatus('JSON backup downloaded'); }
   catch (e) { console.error(e); setStatus('JSON download failed', true); } finally { setExportButtonsDisabled(false); }

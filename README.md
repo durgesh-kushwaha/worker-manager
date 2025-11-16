@@ -1,1 +1,1 @@
-"# worker-manager" 
+# worker-manager
