@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Worker Manager — Kanhaiya Kushwaha</title>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.9.3/html2pdf.bundle.min.js"></script>
+
+  <style>
+    #export-area { background: white; }
+    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+
+    #selected-table th, #selected-table td { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen p-4">
+  <div class="max-w-5xl mx-auto">
+
+    <header class="mb-4">
+      <h1 class="text-2xl font-semibold">Worker Manager - Kanhaiya Kushwaha</h1>
+      <p class="text-sm text-gray-600">Daily report of workers.</p>
+    </header>
+
+    <main class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <section class="bg-white p-4 rounded shadow">
+        <h2 class="font-medium mb-2">Company Logo</h2>
+        <p class="text-sm text-gray-500 mb-2">Upload horizontal logo to include at top of exported document.</p>
+        <input id="logo-input" type="file" accept="image/*" class="mb-2 w-full" />
+        <div class="flex gap-2 mb-3">
+          <button id="clear-logo" class="bg-red-500 text-white px-3 py-1 rounded text-sm">Clear Logo</button>
+        </div>
+
+        <hr class="my-3" />
+
+        <h2 class="font-medium mb-2">Add / Update Worker</h2>
+        <form id="worker-form" class="space-y-2" onsubmit="return false;">
+          <input id="worker-id" placeholder="ID (e.g. WKR001)" class="w-full p-2 border rounded" required />
+          <input id="worker-name" placeholder="Name" class="w-full p-2 border rounded" required />
+          <input id="worker-position" placeholder="Position" class="w-full p-2 border rounded" />
+          <input id="worker-hours" type="number" placeholder="Work Hours" class="w-full p-2 border rounded" />
+          <div class="flex gap-2">
+            <button id="add-worker" type="button" class="bg-blue-600 text-white px-3 py-1 rounded">Add / Save</button>
+            <button id="delete-worker" type="button" class="bg-red-600 text-white px-3 py-1 rounded">Delete</button>
+            <button id="clear-form" type="button" class="bg-gray-300 px-3 py-1 rounded">Clear</button>
+          </div>
+        </form>
+
+        <hr class="my-3" />
+
+        <h2 class="font-medium mb-2">Select Workers</h2>
+        <select id="workers-dropdown" class="w-full p-2 border rounded mb-2">
+          <option value="">-- Select a worker to add to list --</option>
+        </select>
+        <div class="flex gap-2 mb-3">
+          <button id="add-selected" class="bg-green-600 text-white px-3 py-1 rounded">Add to List</button>
+          <button id="clear-list" class="bg-gray-300 px-3 py-1 rounded">Clear List</button>
+        </div>
+
+        <hr class="my-3" />
+
+        <h2 class="font-medium mb-2">CSV Backup</h2>
+        <div class="flex gap-2 mb-2">
+          <button id="export-csv" class="bg-indigo-600 text-white px-3 py-1 rounded">Export CSV</button>
+          <input id="import-csv" type="file" accept=".csv" class="px-2 py-1" />
+        </div>
+
+        <p id="status" class="text-xs text-gray-600 mt-2 break-words"></p>
+      </section>
+
+      <section class="md:col-span-2 bg-white p-4 rounded shadow">
+        <div class="grid grid-cols-[1fr] gap-3 items-start">
+          <div id="export-area" class="p-4 rounded border border-gray-400 w-full">
+            <div id="logo-area" class="w-full flex justify-center items-center mb-4 min-h-[80px] p-4"></div>
+
+            <div class="flex justify-center items-center gap-2 mb-3 exclude-from-export">
+              <label for="export-date-input" class="text-sm font-medium">Date:</label>
+              <input type="text" id="export-date-input" class="p-1 border rounded text-sm" />
+            </div>
+            <p id="export-date-display" class="text-sm text-gray-600 text-center mb-3"></p>
+
+            <h2 class="text-lg font-semibold text-center mb-3">Worker Report Sheet</h2>
+
+            <div id="selected-list-container" class="overflow-auto max-h-80">
+              <table id="selected-table" class="w-full table-auto border-collapse">
+                <thead>
+                  <tr class="bg-gray-100">
+                    <th class="border p-2 text-left">PID</th>
+                    <th class="border p-2 text-left">Name</th>
+                    <th class="border p-2 text-left">Position</th>
+                    <th class="border p-2 text-left">Hours</th>
+                    <th class="border p-2 text-left"> </th> <!-- action column -->
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button id="export-image" class="bg-yellow-600 text-white px-3 py-1 rounded">Export as Image</button>
+            <button id="export-pdf" class="bg-green-700 text-white px-3 py-1 rounded">Export as PDF</button>
+            <button id="download-json" class="bg-gray-600 text-white px-3 py-1 rounded">Download JSON</button>
+            <button id="clear-storage" class="bg-red-500 text-white px-3 py-1 rounded">Clear All Data</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="mt-4 text-xs text-gray-500">Made with ❤️ by Durgesh Kushwaha</footer>
+  </div>
+
+  <script src="script.js" defer></script>
+</body>
+</html>
