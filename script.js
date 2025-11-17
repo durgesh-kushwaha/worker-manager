@@ -214,31 +214,82 @@ async function exportCSV() {
   setStatus("CSV exported");
 }
 async function importCSV(e) {
-  const file = e?.target?.files?.[0]; if (!file) { setStatus("No file selected", true); return; }
-  const text = await file.text(); const cleaned = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  const lines = cleaned.split("\n").filter(l => l.trim()); if (!lines.length) { setStatus("CSV empty", true); e.target.value = null; return; }
-  const header = lines.shift(); const delim = [",", ";", "\t"].reduce((best, d) => (header.split(d).length > header.split(best).length ? d : best), ",");
-  function parseLine(line) {
-    const out = []; let cur = "", inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { if (inQ && line[i + 1] === '"') { cur += '"'; i++; } else inQ = !inQ; continue; }
-      if (!inQ && ch === delim) { out.push(cur); cur = ""; continue; } cur += ch;
-    } out.push(cur); return out.map(s => s.replace(/^"|"$/g, "").trim());
+  const file = e?.target?.files?.[0];
+  if (!file) { setStatus('No file selected', true); return; }
+  try {
+    setStatus('Reading file...');
+    const text = await file.text();
+    const cleaned = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const lines = cleaned.split('\n').filter(l => l.trim());
+    if (!lines.length) { setStatus('CSV empty', true); e.target.value = null; return; }
+    function detectDelimiter(sampleLines) {
+      const candidates = [',',';','\t'];
+      const scores = {',':0,';':0,'\t':0};
+      const sampleCount = Math.min(sampleLines.length, 5);
+      for (let i=0;i<sampleCount;i++){
+        const ln = sampleLines[i];
+        let inQ = false;
+        for (let j=0;j<ln.length;j++){
+          const ch = ln[j];
+          if (ch === '"') { inQ = !inQ; continue; }
+          if (!inQ && scores.hasOwnProperty(ch)) scores[ch]++;
+        }
+      }
+      let best = candidates[0];
+      for (const c of candidates) if (scores[c] > scores[best]) best = c;
+      return best;
+    }
+    const delim = detectDelimiter(lines.slice(0, Math.min(lines.length,10)));
+    function parseCsvLine(line, d) {
+      const fields = [];
+      let cur = '';
+      let inQuotes = false;
+      for (let i=0;i<line.length;i++){
+        const ch = line[i];
+        if (ch === '"') {
+          if (inQuotes && line[i+1] === '"') { cur += '"'; i++; continue; }
+          inQuotes = !inQuotes;
+          continue;
+        }
+        if (!inQuotes && ch === d) { fields.push(cur); cur = ''; continue; }
+        cur += ch;
+      }
+      fields.push(cur);
+      return fields.map(f => f.replace(/^"|"$/g,'').trim());
+    }
+    const header = lines.shift();
+    const headers = parseCsvLine(header, delim).map(h => h.toLowerCase().trim());
+    const idx = {
+      id: headers.indexOf('id') !== -1 ? headers.indexOf('id') : 0,
+      name: headers.indexOf('name') !== -1 ? headers.indexOf('name') : 1,
+      position: headers.indexOf('position') !== -1 ? headers.indexOf('position') : 2,
+      hours: headers.indexOf('hours') !== -1 ? headers.indexOf('hours') : 3
+    };
+    const workers = await loadWorkers();
+    let added = 0, updated = 0, skipped = 0;
+    for (const l of lines) {
+      if (!l.trim()) continue;
+      const cols = parseCsvLine(l, delim);
+      const rec = {
+        id: safeText(cols[idx.id]),
+        name: safeText(cols[idx.name]),
+        position: safeText(cols[idx.position]),
+        hours: safeText(cols[idx.hours])
+      };
+      if (!rec.id || !rec.name) { skipped++; continue; }
+      const ex = workers.findIndex(w => w.id === rec.id);
+      if (ex >= 0) { workers[ex] = rec; updated++; } else { workers.push(rec); added++; }
+    }
+    await saveWorkers(workers);
+    setStatus(`CSV imported — added:${added} updated:${updated} skipped:${skipped}`);
+    e.target.value = null;
+  } catch (err) {
+    console.error('CSV import error', err);
+    setStatus('CSV import failed: ' + (err && err.message ? err.message : err), true);
+    if (e?.target) e.target.value = null;
   }
-  const headers = parseLine(header).map(h => h.toLowerCase().trim());
-  const idx = { id: headers.indexOf("id") !== -1 ? headers.indexOf("id") : 0, name: headers.indexOf("name") !== -1 ? headers.indexOf("name") : 1, position: headers.indexOf("position") !== -1 ? headers.indexOf("position") : 2, hours: headers.indexOf("hours") !== -1 ? headers.indexOf("hours") : 3 };
-  const workers = await loadWorkers(); let added = 0, updated = 0, skipped = 0;
-  for (const l of lines) {
-    if (!l.trim()) continue;
-    const cols = parseLine(l);
-    const rec = { id: safeText(cols[idx.id]), name: safeText(cols[idx.name]), position: safeText(cols[idx.position]), hours: safeText(cols[idx.hours]) };
-    if (!rec.id || !rec.name) { skipped++; continue; }
-    const ex = workers.findIndex(w => w.id === rec.id);
-    if (ex >= 0) { workers[ex] = rec; updated++; } else { workers.push(rec); added++; }
-  }
-  await saveWorkers(workers); setStatus(`CSV imported — added:${added} updated:${updated} skipped:${skipped}`); e.target.value = null;
 }
+
 
 
 async function downloadJSON() { const workers = await loadWorkers(); const blob = new Blob([JSON.stringify(workers, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "workers.json"; a.click(); setStatus("JSON backup downloaded"); }
@@ -358,7 +409,7 @@ async function exportImage() {
   const padding = 40;
   const headerH = 110; 
   const rowH = 28;
-  const colWidths = [90, 240, 150, 90];
+  const colWidths = [90, 190, 155, 90];
   const contentW = colWidths.reduce((a,b)=>a+b,0);
   const canvasW = Math.min(1123, contentW + padding*2); 
   const canvasH = padding*2 + headerH + (selected.length * rowH) + 40;
