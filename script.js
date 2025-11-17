@@ -1,501 +1,528 @@
-// script.js — updated: Remove button in each data row (last cell) with "Remove" text,
-// exclude-from-export class so export won't include it
 
-const WORKERS_KEY = 'workers';
-const SELECTED_LIST_KEY = 'selectedList';
-const LOGO_KEY = 'companyLogoDataUrl';
 
-if (typeof localforage !== 'undefined') localforage.config({ name: 'workerManager' });
+const WORKERS_KEY = "workers";
+const SELECTED_KEY = "selectedWorkers";
+const LOGO_KEY = "companyLogo";
 
-/* ------------------------- Helpers ------------------------- */
-function setStatus(text = '', isError = false) {
-  const s = document.getElementById('status');
-  if (!s) return;
-  s.textContent = text;
-  s.style.color = isError ? '#b91c1c' : '';
-}
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str).replace(/[&<>"'`=\/]/g, function (s) {
-    return ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#47;','`':'&#96;','=':'&#61;'})[s];
-  });
-}
-function setExportButtonsDisabled(disabled = true) {
-  const ids = ['export-image','export-pdf','export-csv','download-json'];
-  ids.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) { el.disabled = disabled; el.style.opacity = disabled ? '0.6' : ''; el.style.pointerEvents = disabled ? 'none' : ''; }
-  });
-}
-function ensureLibs() {
-  const missing = [];
-  if (typeof localforage === 'undefined') missing.push('localforage');
-  if (typeof html2canvas === 'undefined') missing.push('html2canvas');
-  if (typeof window.html2pdf === 'undefined') missing.push('html2pdf');
-  if (missing.length) {
-    setStatus('Missing libraries: ' + missing.join(', ') + '. Check CDN in index.html.', true);
-    console.warn('Missing libs:', missing);
-    return false;
+localforage.config({ name: "modern-worker-manager" });
+
+function safeText(s) { return s === undefined || s === null ? "" : String(s); }
+function ddmmyyyyFromISO(iso) {
+  if (!iso) return (() => {
+    const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+  })();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const [y, m, d] = iso.split("-");
+    return `${d}-${m}-${y}`;
   }
-  return true;
+  if (/^\d{2}-\d{2}-\d{4}$/.test(iso)) return iso;
+  const d = new Date(iso); if (!isNaN(d)) return `${String(d.getDate()).padStart(2, '0')}-${String(d.getMonth() + 1).padStart(2, '0')}-${d.getFullYear()}`;
+  return iso;
 }
-function waitForImages(root) {
-  const imgs = Array.from((root || document).querySelectorAll('img'));
-  if (!imgs.length) return Promise.resolve();
-  return Promise.all(imgs.map(img => {
-    if (img.complete && img.naturalWidth !== 0) return Promise.resolve();
-    return new Promise(resolve => {
-      img.addEventListener('load', resolve, { once: true });
-      img.addEventListener('error', resolve, { once: true });
-      setTimeout(resolve, 5000);
-    });
-  }));
+function setStatus(msg = "", isError = false) {
+  const el = document.getElementById("status");
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = isError ? "crimson" : "";
 }
 
-/* ------------------------- Storage ------------------------- */
-async function loadWorkers() {
-  try {
-    if (typeof localforage === 'undefined') return [];
-    const v = await localforage.getItem(WORKERS_KEY);
-    return Array.isArray(v) ? v : [];
-  } catch (e) { console.error(e); setStatus('Storage read error', true); return []; }
-}
-async function saveWorkers(list) {
-  try {
-    if (typeof localforage === 'undefined') return;
-    await localforage.setItem(WORKERS_KEY, list || []);
-    await populateDropdown();
-  } catch (e) { console.error(e); setStatus('Storage write error', true); }
-}
-async function loadSelectedList() {
-  try {
-    if (typeof localforage === 'undefined') return [];
-    const v = await localforage.getItem(SELECTED_LIST_KEY);
-    return Array.isArray(v) ? v : [];
-  } catch (e) { console.error(e); setStatus('Storage read error', true); return []; }
-}
-async function saveSelectedList(list) {
-  try {
-    if (typeof localforage === 'undefined') return;
-    await localforage.setItem(SELECTED_LIST_KEY, list || []);
-    await renderSelectedTable();
-  } catch (e) { console.error(e); setStatus('Storage write error', true); }
-}
-async function loadLogo() {
-  try {
-    if (typeof localforage === 'undefined') return;
-    const dataUrl = await localforage.getItem(LOGO_KEY);
-    const logoArea = document.getElementById('logo-area');
-    if (!logoArea) return;
-    logoArea.innerHTML = '';
-    if (dataUrl) {
-      const img = document.createElement('img');
-      img.src = dataUrl;
-      img.alt = 'Company Logo';
-      img.style.maxHeight = '80px';
-      img.style.objectFit = 'contain';
-      try { img.loading = 'eager'; } catch (e) {}
-      logoArea.appendChild(img);
-    }
-  } catch (e) { console.error('loadLogo', e); }
-}
-async function saveLogo(dataUrl) {
-  try {
-    if (typeof localforage === 'undefined') return;
-    if (!dataUrl) { await localforage.removeItem(LOGO_KEY); await loadLogo(); return; }
-    await localforage.setItem(LOGO_KEY, dataUrl); await loadLogo();
-  } catch (e) { console.error('saveLogo', e); setStatus('Logo save error', true); }
-}
 
-/* ------------------------- UI rendering ------------------------- */
+async function loadWorkers() { const v = await localforage.getItem(WORKERS_KEY); return Array.isArray(v) ? v : []; }
+async function saveWorkers(list) { await localforage.setItem(WORKERS_KEY, Array.isArray(list) ? list : []); await populateDropdown(); }
+async function loadSelected() { const v = await localforage.getItem(SELECTED_KEY); return Array.isArray(v) ? v : []; }
+async function saveSelected(list) { await localforage.setItem(SELECTED_KEY, Array.isArray(list) ? list : []); await renderSelectedTable(); }
+async function loadLogo() { return await localforage.getItem(LOGO_KEY); }
+async function saveLogoDataUrl(dataUrl) { if (!dataUrl) await localforage.removeItem(LOGO_KEY); else await localforage.setItem(LOGO_KEY, dataUrl); }
+
+
 async function populateDropdown() {
-  const dropdown = document.getElementById('workers-dropdown');
-  if (!dropdown) return;
+  const dd = document.getElementById("workers-dropdown");
+  if (!dd) return;
   const workers = await loadWorkers();
-  dropdown.innerHTML = '<option value="">-- Select a worker to add to list --</option>';
-  for (const w of workers) {
-    const opt = document.createElement('option'); opt.value = w.id; opt.textContent = `${w.name} (${w.id})`; dropdown.appendChild(opt);
+  dd.innerHTML = `<option value="">Choose worker...</option>`;
+  workers.forEach(w => {
+    const opt = document.createElement("option");
+    opt.value = w.id; opt.textContent = `${w.name} (${w.id})`;
+    dd.appendChild(opt);
+  });
+}
+
+
+function clearForm() {
+  ['worker-id', 'worker-name', 'worker-position', 'worker-hours'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = "";
+  });
+}
+async function addOrUpdateWorker() {
+  const id = (document.getElementById("worker-id").value || "").trim();
+  const name = (document.getElementById("worker-name").value || "").trim();
+  const pos = (document.getElementById("worker-position").value || "").trim();
+  const hrs = (document.getElementById("worker-hours").value || "").trim();
+  if (!id || !name) { setStatus("ID and Name are required", true); return; }
+  const workers = await loadWorkers();
+  const idx = workers.findIndex(w => w.id === id);
+  const rec = { id, name, position: pos, hours: hrs };
+  if (idx >= 0) { workers[idx] = rec; setStatus("Worker updated"); } else { workers.push(rec); setStatus("Worker added"); }
+  await saveWorkers(workers); clearForm();
+}
+async function deleteWorker() {
+  const id = (document.getElementById("worker-id").value || "").trim();
+  if (!id) { setStatus("Enter ID to delete", true); return; }
+  let workers = await loadWorkers();
+  const before = workers.length;
+  workers = workers.filter(w => w.id !== id);
+  if (workers.length === before) { setStatus("No worker found with that ID", true); return; }
+  await saveWorkers(workers); setStatus("Worker deleted"); clearForm();
+}
+
+
+async function addToSelected() {
+  const sel = (document.getElementById("workers-dropdown").value || "").trim();
+  if (!sel) { setStatus("Select worker to add", true); return; }
+  const workers = await loadWorkers();
+  const w = workers.find(x => x.id === sel);
+  if (!w) return setStatus("Worker not found", true);
+  const list = await loadSelected();
+  if (list.find(x => x.id === w.id)) { setStatus("Already in selected list"); return; }
+  list.push(w); await saveSelected(list); setStatus("Added to selected list");
+}
+
+
+async function addAllWorkersToSelected() {
+  const workers = await loadWorkers();
+  if (!workers || workers.length === 0) {
+    setStatus("No stored workers to add", true);
+    return;
   }
+
+  const selected = await loadSelected();
+  let added = 0;
+  for (const w of workers) {
+    if (!selected.find(s => s.id === w.id)) {
+      selected.push(w);
+      added++;
+    }
+  }
+
+  if (added > 0) {
+    await saveSelected(selected);
+    setStatus(`Added ${added} worker${added > 1 ? 's' : ''} to the list`);
+  } else {
+    setStatus("All workers already in the list");
+  }
+}
+
+
+async function clearSelected() { await saveSelected([]); setStatus("Selected list cleared"); }
+async function removeSelectedById(id) { let list = await loadSelected(); list = list.filter(x => x.id !== id); await saveSelected(list); setStatus("Removed"); }
+
+
+let currentFilter = "";
+let currentSort = { col: null, dir: 1 };
+
+function ensureSearchBar() {
+  const container = document.getElementById("selected-list-container");
+  if (!container) return;
+  if (document.getElementById("selected-search")) return;
+  const wrapper = document.createElement("div");
+  wrapper.className = "p-2 flex gap-2 items-center";
+  wrapper.innerHTML = `<input id="selected-search" placeholder="Search ID or name..." class="p-2 border rounded flex-1" />
+                       <button id="selected-refresh" class="bg-gray-200 px-3 py-1 rounded">Refresh</button>`;
+  container.parentNode.insertBefore(wrapper, container);
+  document.getElementById("selected-search").addEventListener("input", e => { currentFilter = e.target.value.toLowerCase().trim(); renderSelectedTable(); });
+  document.getElementById("selected-refresh").addEventListener("click", () => { renderSelectedTable(); setStatus("Refreshed"); });
+}
+
+function applyResponsiveActionStyle() {
+
+  const isSmall = window.matchMedia("(max-width:640px)").matches;
+  document.querySelectorAll("#selected-table .action-group").forEach(div => {
+    if (isSmall) {
+      div.classList.add("flex", "flex-col", "gap-2");
+      div.querySelectorAll("button").forEach(b => { b.classList.add("w-full"); });
+    } else {
+      div.classList.remove("flex", "flex-col", "gap-2");
+      div.querySelectorAll("button").forEach(b => { b.classList.remove("w-full"); });
+    }
+  });
 }
 
 async function renderSelectedTable() {
-  const tbody = document.querySelector('#selected-table tbody');
+  ensureSearchBar();
+  const tbody = document.querySelector("#selected-table tbody");
   if (!tbody) return;
-  const selected = await loadSelectedList();
-  tbody.innerHTML = '';
+  let rows = await loadSelected();
 
-  for (const w of selected) {
-    const tr = document.createElement('tr');
 
-    // create cells for data
-    const tdId = document.createElement('td');
-    tdId.className = 'border p-2';
-    tdId.textContent = w.id || '';
-    tr.appendChild(tdId);
+  if (currentFilter) {
+    rows = rows.filter(r => (r.id || "").toLowerCase().includes(currentFilter) || (r.name || "").toLowerCase().includes(currentFilter) || (r.position || "").toLowerCase().includes(currentFilter));
+  }
 
-    const tdName = document.createElement('td');
-    tdName.className = 'border p-2';
-    tdName.textContent = w.name || '';
-    tr.appendChild(tdName);
 
-    const tdPos = document.createElement('td');
-    tdPos.className = 'border p-2';
-    tdPos.textContent = w.position || '';
-    tr.appendChild(tdPos);
+  if (currentSort.col) {
+    rows.sort((a, b) => {
+      const A = safeText(a[currentSort.col]).toLowerCase();
+      const B = safeText(b[currentSort.col]).toLowerCase();
+      if (A < B) return -1 * currentSort.dir; if (A > B) return 1 * currentSort.dir; return 0;
+    });
+  }
 
-    const tdHours = document.createElement('td');
-    tdHours.className = 'border p-2';
-    tdHours.textContent = w.workHours || '';
-    tr.appendChild(tdHours);
-
-    // action cell with Remove button (text "Remove")
-    const tdAction = document.createElement('td');
-    tdAction.className = 'border p-2 text-center';
-    const btn = document.createElement('button');
-    btn.textContent = 'Remove';
-    btn.setAttribute('data-remove-id', w.id);
-    // mark UI-only button to be excluded from export
-    btn.className = 'exclude-from-export bg-red-500 text-white px-3 py-1 rounded text-sm remove-selected-btn';
-    btn.title = 'Remove from selected list';
-    tdAction.appendChild(btn);
-    tr.appendChild(tdAction);
-
+  tbody.innerHTML = "";
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="p-3 border">${r.id}</td>
+      <td class="p-3 border">${r.name}</td>
+      <td class="p-3 border">${r.position || ""}</td>
+      <td class="p-3 border">${r.hours || ""}</td>
+      <td class="p-3 border">
+        <div class="action-group">
+          <button class="edit-btn bg-blue-500 text-white px-3 py-1 rounded text-sm" data-id="${r.id}">Edit</button>
+          <button class="remove-btn bg-red-500 text-white px-3 py-1 rounded text-sm ml-2" data-id="${r.id}">Remove</button>
+        </div>
+      </td>`;
     tbody.appendChild(tr);
-  }
+  });
 
-  // attach remove handlers
-  tbody.querySelectorAll('.remove-selected-btn').forEach(btn => btn.addEventListener('click', async (e) => {
-    const id = e.currentTarget.getAttribute('data-remove-id'); if (!id) return;
-    let list = await loadSelectedList(); list = list.filter(x => x.id !== id); await saveSelectedList(list);
-    setStatus('Removed from list');
-  }));
+
+  tbody.querySelectorAll(".remove-btn").forEach(b => b.addEventListener("click", async (e) => { const id = e.currentTarget.dataset.id; await removeSelectedById(id); }));
+  tbody.querySelectorAll(".edit-btn").forEach(b => b.addEventListener("click", async (e) => { const id = e.currentTarget.dataset.id; const workers = await loadWorkers(); const w = workers.find(x => x.id === id); if (!w) return setStatus("Worker not found", true); document.getElementById("worker-id").value = w.id; document.getElementById("worker-name").value = w.name; document.getElementById("worker-position").value = w.position || ""; document.getElementById("worker-hours").value = w.hours || ""; setStatus("Editing - update and Save"); }));
+
+
+  const headers = document.querySelectorAll("#selected-table thead th");
+  headers.forEach((th, idx) => {
+    const map = ["id", "name", "position", "hours"];
+    const key = map[idx];
+    if (!key) return;
+    th.style.cursor = "pointer";
+    th.onclick = () => { if (currentSort.col === key) currentSort.dir = -currentSort.dir; else { currentSort.col = key; currentSort.dir = 1; } renderSelectedTable(); };
+  });
+
+
+  applyResponsiveActionStyle();
 }
 
-/* ------------------------- Form handlers ------------------------- */
-function clearForm() { ['worker-id','worker-name','worker-position','worker-hours'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; }); setStatus(''); }
-async function onAddWorker() {
-  const id = (document.getElementById('worker-id')?.value || '').trim();
-  const name = (document.getElementById('worker-name')?.value || '').trim();
-  const position = (document.getElementById('worker-position')?.value || '').trim();
-  const workHours = (document.getElementById('worker-hours')?.value || '').trim();
-  if (!id || !name) { setStatus('ID and Name required', true); return; }
+
+async function exportCSV() {
   const workers = await loadWorkers();
-  const idx = workers.findIndex(w => w.id === id);
-  const rec = { id, name, position, workHours };
-  if (idx >= 0) { workers[idx] = rec; setStatus('Worker updated'); } else { workers.push(rec); setStatus('Worker added'); }
-  await saveWorkers(workers); clearForm();
+  if (!workers.length) { setStatus("No workers to export", true); return; }
+  const header = ["id", "name", "position", "hours"].join(",");
+  const rows = workers.map(w => [w.id, w.name, w.position, w.hours].map(x => `"${(x || "").toString().replace(/"/g, '""')}"`).join(","));
+  const csv = [header, ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "workers.csv"; a.click();
+  setStatus("CSV exported");
 }
-async function onDeleteWorker() {
-  const id = (document.getElementById('worker-id')?.value || '').trim();
-  if (!id) { setStatus('Enter worker ID to delete', true); return; }
-  const workers = await loadWorkers();
-  const rem = workers.filter(w => w.id !== id);
-  if (rem.length === workers.length) { setStatus('No worker with that ID', true); return; }
-  await saveWorkers(rem); setStatus('Worker deleted'); clearForm();
-}
-async function onDropdownChange(e) {
-  const id = e?.target?.value || ''; if (!id) return;
-  const workers = await loadWorkers(); const w = workers.find(x => x.id === id); if (!w) return;
-  document.getElementById('worker-id').value = w.id; document.getElementById('worker-name').value = w.name;
-  document.getElementById('worker-position').value = w.position || ''; document.getElementById('worker-hours').value = w.workHours || '';
-}
-async function onAddSelected() {
-  const sel = document.getElementById('workers-dropdown')?.value || '';
-  if (!sel) { setStatus('Choose a worker to add', true); return; }
-  const workers = await loadWorkers(); const w = workers.find(x => x.id === sel); if (!w) { setStatus('Worker not found', true); return; }
-  const list = await loadSelectedList(); if (!list.find(x => x.id === w.id)) { list.push(w); await saveSelectedList(list); setStatus('Worker added to list'); } else setStatus('Worker already in list');
-}
-async function onClearList() { await saveSelectedList([]); setStatus('Selected list cleared'); }
-
-/* ------------------------- CSV / JSON ------------------------- */
-async function onExportCsv() {
-  try { setExportButtonsDisabled(true); const workers = await loadWorkers(); if (!workers.length) { setStatus('No workers to export'); return; }
-    const header = ['id','name','position','workHours']; const rows = workers.map(w => header.map(h => `"${(w[h]||'').toString().replace(/"/g,'""')}"`).join(',')); const csv = [header.join(',')].concat(rows).join('\n');
-    const blob = new Blob([csv], {type:'text/csv'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'workers.csv'; a.click(); URL.revokeObjectURL(url); setStatus('CSV exported');
-  } catch (e) { console.error(e); setStatus('CSV export failed', true); } finally { setExportButtonsDisabled(false); }
-}
-async function onImportCsv(e) {
-  try {
-    const file = e?.target?.files?.[0];
-    if (!file) { setStatus('No file selected', true); return; }
-
-    setExportButtonsDisabled(true);
-    setStatus('Reading file...');
-
-    // Read as text (UTF-8). If file uses other encoding, this may still work.
-    const text = await file.text();
-
-    if (!text || !text.trim()) { setStatus('CSV file is empty', true); if (e?.target) e.target.value = null; return; }
-
-    // Remove UTF-8 BOM if present
-    const BOM_REGEX = /^\uFEFF/;
-    const cleaned = text.replace(BOM_REGEX, '');
-
-    // Normalise newlines
-    const normalized = cleaned.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-
-    // Split into lines but keep quoted fields intact — we'll parse each line robustly.
-    const lines = normalized.split('\n').filter(l => l.trim() !== '');
-
-    if (!lines.length) { setStatus('CSV contains no data', true); if (e?.target) e.target.value = null; return; }
-
-    // Detect delimiter by sampling first few lines: prefer comma, else semicolon, else tab
-    function detectDelimiter(sampleLines, candidates = [',',';','\t']) {
-      const scores = {};
-      candidates.forEach(d => scores[d] = 0);
-      const sampleCount = Math.min(sampleLines.length, 5);
-      for (let i=0;i<sampleCount;i++){
-        const ln = sampleLines[i];
-        candidates.forEach(d => {
-          // Rough heuristic: count occurrences outside quotes
-          let count = 0, inQ=false;
-          for (let chIndex=0; chIndex<ln.length; chIndex++){
-            const ch = ln[chIndex];
-            if (ch === '"') { inQ = !inQ; continue; }
-            if (!inQ && ch === d) count++;
-          }
-          scores[d] += count;
-        });
-      }
-      // choose delimiter with highest score (fallback to comma)
-      let best = candidates[0];
-      candidates.forEach(d => { if (scores[d] > scores[best]) best = d; });
-      return best;
-    }
-
-    const delimiter = detectDelimiter(lines.slice(0, Math.min(lines.length, 10)));
-    // CSV parser that handles quoted fields and escaped quotes ("")
-    function parseCsvLine(line, delim) {
-      const fields = [];
-      let cur = '';
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') {
-          // if next is also quote, it's an escaped quote
-          if (inQuotes && line[i+1] === '"') {
-            cur += '"';
-            i++; // skip next
-          } else {
-            inQuotes = !inQuotes;
-          }
-          continue;
-        }
-        if (!inQuotes && ch === delim) {
-          fields.push(cur);
-          cur = '';
-          continue;
-        }
-        cur += ch;
-      }
-      fields.push(cur);
-      // Trim surrounding spaces
-      return fields.map(f => f.trim());
-    }
-
-    // First line is header (attempt)
-    const headerLine = lines.shift();
-    const headerCandidates = parseCsvLine(headerLine, delimiter).map(h => h.replace(/^"|"$/g,'').trim().toLowerCase());
-
-    // Map header names to indexes
-    const indexMap = {
-      id: headerCandidates.indexOf('id'),
-      name: headerCandidates.indexOf('name'),
-      position: headerCandidates.indexOf('position'),
-      workHours: headerCandidates.indexOf('workhours') !== -1 ? headerCandidates.indexOf('workhours') : headerCandidates.indexOf('hours')
-    };
-
-    // If header doesn't include expected columns, try heuristic (first 4 columns)
-    if (indexMap.id === -1 || indexMap.name === -1) {
-      // fallback: assume first two columns are id + name
-      indexMap.id = indexMap.id === -1 ? 0 : indexMap.id;
-      indexMap.name = indexMap.name === -1 ? 1 : indexMap.name;
-      if (indexMap.position === -1) indexMap.position = 2;
-      if (indexMap.workHours === -1) indexMap.workHours = 3;
-    }
-
-    const workers = await loadWorkers();
-
-    let added = 0, updated = 0, skipped = 0;
-    for (const rawLine of lines) {
-      if (!rawLine.trim()) continue;
-      const cols = parseCsvLine(rawLine, delimiter).map(c => c.replace(/^"|"$/g,'').trim());
-      const rec = {
-        id: cols[indexMap.id] || '',
-        name: cols[indexMap.name] || '',
-        position: cols[indexMap.position] || '',
-        workHours: cols[indexMap.workHours] || ''
-      };
-      if (!rec.id || !rec.name) { skipped++; continue; }
-      const existingIndex = workers.findIndex(w => w.id === rec.id);
-      if (existingIndex >= 0) { workers[existingIndex] = rec; updated++; } else { workers.push(rec); added++; }
-    }
-
-    await saveWorkers(workers);
-    setStatus(`CSV imported — added: ${added}, updated: ${updated}, skipped: ${skipped}`);
-    if (e?.target) e.target.value = null;
-  } catch (err) {
-    console.error('CSV import error', err);
-    setStatus('CSV import failed: ' + (err && err.message ? err.message : err), true);
-    if (e?.target) e.target.value = null;
-  } finally {
-    setExportButtonsDisabled(false);
+async function importCSV(e) {
+  const file = e?.target?.files?.[0]; if (!file) { setStatus("No file selected", true); return; }
+  const text = await file.text(); const cleaned = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = cleaned.split("\n").filter(l => l.trim()); if (!lines.length) { setStatus("CSV empty", true); e.target.value = null; return; }
+  const header = lines.shift(); const delim = [",", ";", "\t"].reduce((best, d) => (header.split(d).length > header.split(best).length ? d : best), ",");
+  function parseLine(line) {
+    const out = []; let cur = "", inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { if (inQ && line[i + 1] === '"') { cur += '"'; i++; } else inQ = !inQ; continue; }
+      if (!inQ && ch === delim) { out.push(cur); cur = ""; continue; } cur += ch;
+    } out.push(cur); return out.map(s => s.replace(/^"|"$/g, "").trim());
   }
+  const headers = parseLine(header).map(h => h.toLowerCase().trim());
+  const idx = { id: headers.indexOf("id") !== -1 ? headers.indexOf("id") : 0, name: headers.indexOf("name") !== -1 ? headers.indexOf("name") : 1, position: headers.indexOf("position") !== -1 ? headers.indexOf("position") : 2, hours: headers.indexOf("hours") !== -1 ? headers.indexOf("hours") : 3 };
+  const workers = await loadWorkers(); let added = 0, updated = 0, skipped = 0;
+  for (const l of lines) {
+    if (!l.trim()) continue;
+    const cols = parseLine(l);
+    const rec = { id: safeText(cols[idx.id]), name: safeText(cols[idx.name]), position: safeText(cols[idx.position]), hours: safeText(cols[idx.hours]) };
+    if (!rec.id || !rec.name) { skipped++; continue; }
+    const ex = workers.findIndex(w => w.id === rec.id);
+    if (ex >= 0) { workers[ex] = rec; updated++; } else { workers.push(rec); added++; }
+  }
+  await saveWorkers(workers); setStatus(`CSV imported — added:${added} updated:${updated} skipped:${skipped}`); e.target.value = null;
 }
 
-async function onDownloadJson() {
-  try { setExportButtonsDisabled(true); const workers = await loadWorkers(); const blob = new Blob([JSON.stringify(workers,null,2)],{type:'application/json'}); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'workers.json'; a.click(); URL.revokeObjectURL(url); setStatus('JSON backup downloaded'); }
-  catch (e) { console.error(e); setStatus('JSON download failed', true); } finally { setExportButtonsDisabled(false); }
-}
 
-/* ------------------------- Logo ------------------------- */
-async function onLogoUpload(e) {
-  const file = e?.target?.files?.[0]; if (!file) return;
+async function downloadJSON() { const workers = await loadWorkers(); const blob = new Blob([JSON.stringify(workers, null, 2)], { type: "application/json" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "workers.json"; a.click(); setStatus("JSON backup downloaded"); }
+
+
+async function handleLogoUpload(file) {
+  if (!file) return;
   const reader = new FileReader();
-  reader.onload = async () => { try { await saveLogo(reader.result); setStatus('Logo saved'); } catch (e) { console.error(e); setStatus('Logo save failed', true); } };
+  reader.onload = async () => { await saveLogoDataUrl(reader.result); await renderLogo(); setStatus("Logo uploaded"); };
   reader.readAsDataURL(file);
 }
+async function renderLogo() {
+  const area = document.getElementById("logo-area"); if (!area) return; area.innerHTML = "";
+  const data = await loadLogo(); if (!data) return;
+  const img = document.createElement("img"); img.src = data; img.style.maxHeight = "60px"; img.style.objectFit = "contain"; area.appendChild(img);
+}
 
-/* ------------------------- Image / PDF export (unchanged) ------------------------- */
-async function onExportImage() {
-  if (!ensureLibs()) return;
-  const exportElement = document.getElementById('export-area');
-  if (!exportElement) { setStatus('Export area not found', true); return; }
-  
-  try {
-    setExportButtonsDisabled(true);
-    setStatus('Preparing image (waiting for images)...');
 
-    // Update date display from input before capture
-    const dateVal = document.getElementById('export-date-input')?.value || '';
-    const dateDisp = document.getElementById('export-date-display');
-    if (dateDisp) dateDisp.textContent = `Date: ${dateVal}`;
+async function exportPDF() {
+  const selected = await loadSelected();
+  if (!selected.length) { setStatus("No rows to export", true); return; }
 
-    await waitForImages(exportElement);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
 
-    const rect = exportElement.getBoundingClientRect();
-    const fullWidth = Math.max(exportElement.scrollWidth, Math.ceil(rect.width));
-    const fullHeight = Math.max(exportElement.scrollHeight, Math.ceil(rect.height));
 
-    setStatus('Rendering image...');
-    const canvas = await html2canvas(exportElement, {
-      useCORS: true,
-      backgroundColor: '#ffffff',
-      width: fullWidth,
-      height: fullHeight,
-      windowWidth: fullWidth,
-      windowHeight: fullHeight,
-      scrollX: 0,
-      scrollY: 0,
-      scale: 2,
-      ignoreElements: (element) => element.classList && element.classList.contains('exclude-from-export')
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 40;
+  let cursorY = 30;
+
+
+  const logoData = await loadLogo();
+  if (logoData) {
+    try {
+
+      const img = new Image();
+      img.src = logoData;
+      await new Promise((res) => { img.onload = res; img.onerror = res; });
+      const maxW = 300; const maxH = 80;
+      let w = img.width, h = img.height;
+      const ratio = Math.min(maxW / w, maxH / h, 1);
+      w = w * ratio; h = h * ratio;
+      const x = (pageWidth - w) / 2;
+      doc.addImage(logoData, "PNG", x, cursorY, w, h);
+      cursorY += h + 12;
+    } catch (e) { console.warn("logo add failed", e); }
+  }
+
+
+  doc.setFontSize(18);
+  doc.setFont("helvetica", "bold");
+  doc.text("Workers Overtime Report", margin, cursorY + 8);
+
+
+  const rawDate = document.getElementById("export-date-input").value;
+  const ddmm = ddmmyyyyFromISO(rawDate);
+  doc.setFontSize(11); doc.setFont("helvetica", "normal");
+  doc.text(`Date: ${ddmm}`, pageWidth - margin - doc.getTextWidth(`Date: ${ddmm}`), cursorY + 8);
+
+  cursorY += 30;
+
+
+  const body = selected.map(r => [r.id, r.name, r.position || "", r.hours || ""]);
+
+
+doc.autoTable({
+  startY: cursorY,
+  head: [["PID","Name","Position","Hours"]],
+  body,
+  theme: "plain", 
+  styles: {
+    fontSize: 11,
+    cellPadding: 8,
+    textColor: 20,
+    overflow: 'linebreak',
+    valign: 'middle'
+  },
+  headStyles: {
+    fillColor: [14,165,164], 
+    textColor: 255,
+    fontStyle: 'bold'
+  },
+  alternateRowStyles: {
+    fillColor: [245, 250, 250]
+  },
+  columnStyles: {
+    1: { fontStyle: 'bold' } 
+  },
+  tableLineColor: [220,220,225],
+  tableLineWidth: 0.4,
+  margin: { left: margin, right: margin },
+
+  didDrawPage: function (data) {
+    const pageCount = doc.internal.getNumberOfPages();
+    doc.setFontSize(9);
+    doc.setTextColor(110);
+    doc.text(`Generated on ${ddmm}`, margin, doc.internal.pageSize.getHeight() - 30);
+    const pageStr = `Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`;
+    doc.text(pageStr, pageWidth - margin - doc.getTextWidth(pageStr), doc.internal.pageSize.getHeight() - 30);
+  }
+});
+
+
+
+  const filename = `workers-${ddmm}.pdf`;
+  doc.save(filename);
+  setStatus(`PDF exported as ${filename}`);
+}
+
+
+
+async function exportImage() {
+  const selected = await loadSelected();
+  if (!selected.length) { setStatus("No selected rows to export (image)", true); return; }
+
+
+  const padding = 40;
+  const headerH = 110; 
+  const rowH = 28;
+  const colWidths = [90, 240, 150, 90];
+  const contentW = colWidths.reduce((a,b)=>a+b,0);
+  const canvasW = Math.min(1123, contentW + padding*2); 
+  const canvasH = padding*2 + headerH + (selected.length * rowH) + 40;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+  const ctx = canvas.getContext("2d");
+
+
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0,0,canvasW,canvasH);
+
+  let y = padding;
+
+
+  const logoData = await loadLogo();
+  if(logoData){
+    await new Promise(res=>{
+      const img = new Image(); img.onload = ()=>{
+        const maxW = 320, maxH = 80;
+        let w=img.width, h=img.height; const ratio = Math.min(maxW/w, maxH/h, 1);
+        w*=ratio; h*=ratio;
+        const x = (canvasW - w)/2;
+        ctx.drawImage(img, x, y, w, h);
+        y += h + 10; res();
+      };
+      img.onerror = ()=>{ res(); };
+      img.src = logoData;
     });
-
-    const dataUrl = canvas.toDataURL('image/png', 1.0);
-    const a = document.createElement('a');
-    a.href = dataUrl; a.download = 'workers.png'; a.click();
-    setStatus('Image downloaded');
-  } catch (e) {
-    console.error('onExportImage error', e);
-    setStatus('Image export failed: ' + (e?.message || e), true);
-  } finally {
-    setExportButtonsDisabled(false);
+  } else {
+    y += 10;
   }
-}
 
-async function onExportPdf() {
-  if (!ensureLibs()) return;
-  const exportElement = document.getElementById('export-area');
-  if (!exportElement) { setStatus('Export area not found', true); return; }
 
-  try {
-    setExportButtonsDisabled(true);
-    setStatus('Preparing PDF (waiting for images)...');
+  ctx.fillStyle = "#111827";
+  ctx.font = "bold 18px Arial";
+  ctx.fillText("Workers Overtime Report", padding, y + 6);
 
-    // Update date display from input before capture
-    const dateVal = document.getElementById('export-date-input')?.value || '';
-    const dateDisp = document.getElementById('export-date-display');
-    if (dateDisp) dateDisp.textContent = `Date: ${dateVal}`;
+  const rawDate = document.getElementById("export-date-input").value;
+  const ddmm = ddmmyyyyFromISO(rawDate);
+  ctx.font = "12px Arial";
+  ctx.fillText(`Date: ${ddmm}`, canvasW - padding - ctx.measureText(`Date: ${ddmm}`).width, y + 6);
+  y += 30;
 
-    await waitForImages(exportElement);
 
-    setStatus('Generating PDF...');
-    const opt = {
-      margin: 0.4,
-      filename: 'workers.pdf',
-      image: { type: 'jpeg', quality: 0.98 },
-      jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' },
-      html2canvas: {
-        scale: 2,
-        useCORS: true,
-        ignoreElements: (element) => element.classList && element.classList.contains('exclude-from-export')
+  const tableX = padding; 
+  const tableW = canvasW - padding*2;
+  ctx.fillStyle = "#e6f0fb";
+  ctx.fillRect(tableX, y, tableW, rowH);
+
+
+  ctx.fillStyle = "#0b63b8";
+  ctx.font = "600 12px Arial";
+  let x = tableX;
+  const headers = ["PID","Name","Position","Hours"];
+  for(let i=0;i<headers.length;i++){
+    ctx.fillText(headers[i], x + 6, y + 18);
+    x += colWidths[i];
+  }
+  y += rowH;
+
+
+  ctx.font = "12px Arial";
+  for(let i=0;i<selected.length;i++){
+    const r = selected[i];
+    if(i%2===0){ ctx.fillStyle = "#ffffff"; } 
+    else { ctx.fillStyle = "#f8fafc"; ctx.fillRect(tableX, y, tableW, rowH); }
+
+    ctx.fillStyle = "#111827";
+    x = tableX;
+
+
+    ctx.fillText(safeText(r.id), x + 6, y + 18); 
+    x += colWidths[0];
+
+
+    drawWrapText(ctx, safeText(r.name), x + 6, y + 6, colWidths[1] - 12, 14);
+    x += colWidths[1];
+
+
+    drawWrapText(ctx, safeText(r.position||""), x + 6, y + 6, colWidths[2] - 12, 14);
+    x += colWidths[2];
+
+
+    ctx.fillText(safeText(r.hours||""), x + 6, y + 18);
+
+    y += rowH;
+  }
+
+
+  canvas.toBlob(blob=>{
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `workers-${ddmm}.png`;
+    a.click();
+    setStatus("Image exported");
+  }, "image/png", 1.0);
+
+
+  function drawWrapText(ctx, text, x, y, maxWidth, lineHeight){
+    const words = text.split(/\s+/);
+    let line=""; let curY = y + 12;
+    for(let i=0;i<words.length;i++){
+      const test = line + words[i] + " ";
+      if(ctx.measureText(test).width > maxWidth && i>0){
+        ctx.fillText(line.trim(), x, curY);
+        line = words[i] + " ";
+        curY += lineHeight;
+      } else {
+        line = test;
       }
-    };
-
-    await window.html2pdf().set(opt).from(exportElement).save();
-    setStatus('PDF download started');
-  } catch (e) {
-    console.error('onExportPdf error', e);
-    setStatus('PDF export failed: ' + (e?.message || e), true);
-  } finally {
-    setExportButtonsDisabled(false);
+    }
+    if(line) ctx.fillText(line.trim(), x, curY);
   }
 }
 
-/* ------------------------- Clear storage ------------------------- */
-async function onClearStorage() {
-  if (!confirm('Clear all data from this app on this device? This cannot be undone.')) return;
+
+
+async function clearAll() { if (!confirm("Clear all data?")) return; await localforage.clear(); await populateDropdown(); await saveSelected([]); await renderLogo(); setStatus("Cleared all data"); }
+
+
+async function init() {
   try {
-    if (typeof localforage !== 'undefined') await localforage.clear();
-    await populateDropdown(); await saveSelectedList([]); await loadLogo();
-    initializeDate();
-    setStatus('All data cleared');
-  } catch (e) { console.error(e); setStatus('Failed to clear storage', true); }
-}
-
-/* ------------------------- Date helper ------------------------- */
-function initializeDate() {
-  const options = { year: 'numeric', month: 'long', day: 'numeric' };
-  const dateString = new Date().toLocaleDateString(undefined, options);
-  const dateInput = document.getElementById('export-date-input');
-  const dateDisplay = document.getElementById('export-date-display');
-  if (dateInput) dateInput.value = dateString;
-  if (dateDisplay) dateDisplay.textContent = `Date: ${dateString}`;
-}
-
-/* ------------------------- Wiring & init ------------------------- */
-function attachEventListeners() {
-  document.getElementById('add-worker')?.addEventListener('click', onAddWorker);
-  document.getElementById('delete-worker')?.addEventListener('click', onDeleteWorker);
-  document.getElementById('clear-form')?.addEventListener('click', clearForm);
-  document.getElementById('workers-dropdown')?.addEventListener('change', onDropdownChange);
-  document.getElementById('add-selected')?.addEventListener('click', onAddSelected);
-  document.getElementById('clear-list')?.addEventListener('click', onClearList);
-  document.getElementById('export-image')?.addEventListener('click', onExportImage);
-  document.getElementById('export-pdf')?.addEventListener('click', onExportPdf);
-  document.getElementById('export-csv')?.addEventListener('click', onExportCsv);
-  document.getElementById('download-json')?.addEventListener('click', onDownloadJson);
-  document.getElementById('clear-storage')?.addEventListener('click', onClearStorage);
-  document.getElementById('import-csv')?.addEventListener('change', onImportCsv);
-  document.getElementById('logo-input')?.addEventListener('change', onLogoUpload);
-  document.getElementById('clear-logo')?.addEventListener('click', async () => { await saveLogo(null); setStatus('Logo cleared'); });
-
-  document.getElementById('export-date-input')?.addEventListener('input', (e) => {
-    const dateDisplay = document.getElementById('export-date-display');
-    if (dateDisplay) dateDisplay.textContent = `Date: ${e.target.value}`;
-  });
-}
-
-(async function init(){
-  try {
-    attachEventListeners();
     await populateDropdown();
-    const sel = await loadSelectedList(); await saveSelectedList(sel);
-    await loadLogo();
-    initializeDate();
-    setStatus('Ready');
-  } catch (e) {
-    console.error('init error', e);
-    setStatus('Initialization failed', true);
+    await renderSelectedTable();
+    await renderLogo();
+
+  const dateInput = document.getElementById("export-date-input");
+    const now = new Date();
+    dateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const display = document.getElementById("export-date-display");
+    if (display) display.textContent = ddmmyyyyFromISO(dateInput.value);
+    dateInput.addEventListener("input", () => { if (display) display.textContent = ddmmyyyyFromISO(dateInput.value); });
+
+  document.getElementById("add-worker").onclick = addOrUpdateWorker;
+    document.getElementById("delete-worker").onclick = deleteWorker;
+    document.getElementById("clear-form").onclick = clearForm;
+
+    document.getElementById("add-selected").onclick = addToSelected;
+    document.getElementById("clear-list").onclick = clearSelected;
+
+    const addAllBtn = document.getElementById("add-all-workers");
+    if (addAllBtn) addAllBtn.onclick = addAllWorkersToSelected;
+
+
+    document.getElementById("export-csv").onclick = exportCSV;
+    document.getElementById("import-csv").onchange = importCSV;
+    document.getElementById("download-json").onclick = downloadJSON;
+    document.getElementById("clear-storage").onclick = clearAll;
+
+    document.getElementById("export-pdf").onclick = exportPDF;
+    document.getElementById("export-image").onclick = exportImage;
+
+  document.getElementById("logo-input").onchange = (e) => { if (e.target.files && e.target.files[0]) handleLogoUpload(e.target.files[0]); };
+    document.getElementById("clear-logo").onclick = async () => { await saveLogoDataUrl(null); await renderLogo(); setStatus("Logo cleared"); };
+
+  window.addEventListener("resize", () => { applyResponsiveActionStyle(); });
+    applyResponsiveActionStyle();
+    setStatus("Ready");
+  } catch (err) {
+    console.error("init error", err);
+    setStatus("Initialization failed: " + (err && err.message), true);
   }
-})();
+}
+
+init();
