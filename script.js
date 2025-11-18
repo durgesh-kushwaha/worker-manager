@@ -556,7 +556,7 @@ async function exportPDF() {
     columnStyles: { 1: { fontStyle: "bold" } },
     tableLineColor: [220, 220, 225],
     tableLineWidth: 0.4,
-    margin: { left: margin + 10, right: margin + 10 },
+    margin: { left: margin, right: margin},
     didDrawPage: function (data) {
       const pageCount = doc.internal.getNumberOfPages();
       doc.setFontSize(9);

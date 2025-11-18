@@ -4,108 +4,101 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Worker Manager</title>
-  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <style>
-    body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
-    @media (max-width:640px){
-      #selected-table .action-group{display:flex!important;flex-direction:column!important;gap:8px!important}
-      #selected-table .action-group button{width:100%!important;margin-left:0!important}
-    }
-  </style>
+  <link rel="stylesheet" href="style.css" />
 </head>
-<body class="bg-gray-100 min-h-screen">
-  <nav class="w-full bg-white shadow-sm py-3 px-6 flex justify-between items-center">
-    <h1 class="text-xl font-semibold">Worker Manager</h1>
-    <div class="text-sm text-gray-600">Mobile-friendly • Local storage</div>
+<body>
+  <nav class="nav-bar">
+    <h1>Worker Manager</h1>
+    <div class="nav-bar-info">Mobile-friendly • Local storage</div>
   </nav>
 
-  <div class="max-w-7xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <section class="bg-white p-5 rounded-xl shadow">
-      <div class="mb-5">
-        <h2 class="text-lg font-semibold mb-2">Company Logo</h2>
-        <input id="logo-input" type="file" accept="image/*" class="w-full text-sm bg-gray-100 p-2 rounded border" />
-        <button id="clear-logo" class="mt-3 w-full bg-red-500 text-white py-2 rounded-lg">Remove Logo</button>
+  <div class="container">
+    <section class="card sidebar">
+      <div class="form-section">
+        <h2>Company Logo</h2>
+        <input id="logo-input" type="file" accept="image/*" class="input-field file-input" />
+        <button id="clear-logo" class="btn btn-danger-500 mt-3">Remove Logo</button>
       </div>
 
-      <div class="mb-6">
-        <h2 class="text-lg font-semibold mb-2">Add / Update Worker</h2>
-        <div class="space-y-3">
-          <input id="worker-id" placeholder="Worker ID" class="w-full p-3 rounded border bg-gray-50" />
-          <input id="worker-name" placeholder="Full Name" class="w-full p-3 rounded border bg-gray-50" />
-          <input id="worker-position" placeholder="Position" class="w-full p-3 rounded border bg-gray-50" />
-          <input id="worker-hours" placeholder="Work Hours" type="number" class="w-full p-3 rounded border bg-gray-50" />
-          <div class="flex gap-3">
-            <button id="add-worker" class="flex-1 bg-blue-600 text-white py-2 rounded-lg">Save Worker</button>
-            <button id="delete-worker" class="flex-1 bg-red-600 text-white py-2 rounded-lg">Delete</button>
+      <div class="form-section">
+        <h2>Add / Update Worker</h2>
+        <div class="input-stack">
+          <input id="worker-id" placeholder="Worker ID" class="input-field" />
+          <input id="worker-name" placeholder="Full Name" class="input-field" />
+          <input id="worker-position" placeholder="Position" class="input-field" />
+          <input id="worker-hours" placeholder="Work Hours" type="number" class="input-field" />
+          <div class="input-group">
+            <button id="add-worker" class="btn btn-primary btn-flex">Save Worker</button>
+            <button id="delete-worker" class="btn btn-danger-600 btn-flex">Delete</button>
           </div>
-          <button id="clear-form" class="w-full bg-gray-300 py-2 rounded-lg">Clear</button>
+          <button id="clear-form" class="btn btn-secondary">Clear</button>
         </div>
       </div>
 
-      <div class="mb-6">
-        <h2 class="text-lg font-semibold mb-2">Select Worker</h2>
-        <select id="workers-dropdown" class="w-full p-3 rounded border bg-gray-50">
+      <div class="form-section">
+        <h2>Select Worker</h2>
+        <select id="workers-dropdown" class="input-field">
           <option value="">-- Select a worker to add to list --</option>
         </select>
-        <div class="flex gap-3 mt-3">
-          <button id="add-selected" class="flex-1 bg-green-600 text-white py-2 rounded-lg">Add to List</button>
-          <button id="clear-list" class="flex-1 bg-gray-400 text-white py-2 rounded-lg">Clear List</button>
+        <div class="input-group mt-3">
+          <button id="add-selected" class="btn btn-success btn-flex">Add to List</button>
+          <button id="clear-list" class="btn btn-gray-400 btn-flex">Clear List</button>
         </div>
-        <button id="add-all-workers" class="mt-3 w-full bg-indigo-600 text-white py-2 rounded-lg">Add All Workers to List</button>
+        <button id="add-all-workers" class="btn btn-indigo mt-3">Add All Workers to List</button>
       </div>
 
-      <div class="mb-6">
-        <h2 class="text-lg font-semibold mb-2">Bulk Edit Hours</h2>
-        <div class="space-y-3">
-          <input id="bulk-hours-input" type="number" placeholder="Set hours (e.g. 8)" class="w-full p-3 rounded border bg-gray-50" />
-          <div class="flex items-center gap-2">
-            <input id="bulk-only-selected" type="checkbox" class="h-4 w-4" />
-            <label for="bulk-only-selected" class="text-sm text-gray-700">Apply only to today's list (unchecked = all workers)</label>
+      <div class="form-section">
+        <h2>Bulk Edit Hours</h2>
+        <div class="input-stack">
+          <input id="bulk-hours-input" type="number" placeholder="Set hours (e.g. 8)" class="input-field" />
+          <div class="checkbox-group">
+            <input id="bulk-only-selected" type="checkbox" />
+            <label for="bulk-only-selected">Apply only to today's list (unchecked = all workers)</label>
           </div>
-          <div class="flex gap-3">
-            <button id="apply-bulk-hours" class="flex-1 bg-yellow-600 text-white py-2 rounded-lg">Apply Hours</button>
-            <button id="increment-bulk-hours" class="flex-1 bg-emerald-600 text-white py-2 rounded-lg">Add +1 Hour</button>
+          <div class="input-group">
+            <button id="apply-bulk-hours" class="btn btn-warning btn-flex">Apply Hours</button>
+            <button id="increment-bulk-hours" class="btn btn-emerald btn-flex">Add +1 Hour</button>
           </div>
         </div>
       </div>
 
-      <div class="mb-6">
-        <h2 class="text-lg font-semibold mb-2">CSV Backup</h2>
-        <div class="flex flex-col gap-3">
-          <button id="export-csv" class="w-full bg-indigo-600 text-white py-2 rounded-lg">Export CSV</button>
-          <input id="import-csv" type="file" accept=".csv,text/csv,text/plain,*/*" class="bg-gray-100 w-full p-2 rounded border" />
+      <div class="form-section">
+        <h2>CSV Backup</h2>
+        <div class="input-stack">
+          <button id="export-csv" class="btn btn-indigo">Export CSV</button>
+          <input id="import-csv" type="file" accept=".csv,text/csv,text/plain,*/*" class="input-field file-input" />
         </div>
       </div>
 
-      <div class="text-xs text-gray-600" id="status">Ready</div>
+      <div class="status-bar" id="status">Ready</div>
     </section>
 
-    <section class="lg:col-span-2">
-      <div id="export-area" class="bg-white rounded-xl shadow p-6">
-        <div id="logo-area" class="flex justify-center items-center min-h-[80px] mb-4 bg-gray-50 rounded"></div>
+    <section class="main-content">
+      <div id="export-area" class="card card-p6">
+        <div id="logo-area"></div>
 
-        <div class="flex justify-center items-center gap-3 mb-4">
-          <label class="font-medium">Date:</label>
-          <input id="export-date-input" class="p-2 border rounded bg-gray-50" type="date" />
+        <div class="date-controls">
+          <label>Date:</label>
+          <input id="export-date-input" class="input-field" type="date" style="width: auto;" />
         </div>
 
-        <p id="export-date-display" class="text-center mb-6 text-sm text-gray-500"></p>
+        <p id="export-date-display"></p>
 
-        <h2 id="export-title" class="text-2xl font-bold text-left mb-5">Today's Workers Overtime Sheet</h2>
+        <h2 id="export-title">Today's Workers Overtime Sheet</h2>
 
-        <div id="selected-list-container" class="overflow-auto max-h-[420px] rounded-lg border">
-          <table id="selected-table" class="w-full text-sm">
-            <thead class="bg-gray-100 sticky top-0 z-10">
+        <div id="selected-list-container" class="table-wrapper">
+          <table id="selected-table" class="data-table">
+            <thead class="table-header">
               <tr>
-                <th class="p-3 border text-left">PID</th>
-                <th class="p-3 border text-left">Name</th>
-                <th class="p-3 border text-left">Hours</th>
-                <th class="p-3 border text-left">Position</th>
-                <th class="p-3 border text-left">Action</th>
+                <th>PID</th>
+                <th>Name</th>
+                <th>Hours</th>
+                <th>Position</th>
+                <th>Action</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -113,18 +106,18 @@
         </div>
       </div>
 
-      <div class="mt-6 flex flex-wrap gap-3">
-        <button id="export-pdf" class="bg-green-700 text-white px-4 py-2 rounded-lg shadow">Export PDF</button>
-        <button id="export-image" class="bg-yellow-600 text-white px-4 py-2 rounded-lg shadow">Export Image</button>
-        <button id="download-json" class="bg-gray-700 text-white px-4 py-2 rounded-lg shadow">Backup JSON</button>
-        <button id="clear-storage" class="bg-red-500 text-white px-4 py-2 rounded-lg shadow">Clear All Data</button>
+      <div class="export-buttons-group">
+        <button id="export-pdf" class="btn-emerald">Export PDF</button>
+        <button id="export-image" class="btn-warning">Export Image</button>
+        <button id="download-json" class="btn-gray-700">Backup JSON</button>
+        <button id="clear-storage" class="btn-danger-500">Clear All Data</button>
       </div>
     </section>
   </div>
 
   <script src="script.js" defer></script>
 
-  <footer class="w-full text-center py-4 mt-10 text-gray-500 text-sm border-t">
+  <footer class="app-footer">
     Made with ❤️ by Durgesh Kushwaha
   </footer>
 </body>
