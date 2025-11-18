@@ -173,8 +173,8 @@ async function renderSelectedTable() {
     tr.innerHTML = `
       <td class="p-3 border">${r.id}</td>
       <td class="p-3 border">${r.name}</td>
-      <td class="p-3 border">${r.position || ""}</td>
       <td class="p-3 border">${r.hours || ""}</td>
+      <td class="p-3 border">${r.position || ""}</td>
       <td class="p-3 border">
         <div class="action-group">
           <button class="edit-btn bg-blue-500 text-white px-3 py-1 rounded text-sm" data-id="${r.id}">Edit</button>
@@ -223,13 +223,13 @@ async function importCSV(e) {
     const lines = cleaned.split('\n').filter(l => l.trim());
     if (!lines.length) { setStatus('CSV empty', true); e.target.value = null; return; }
     function detectDelimiter(sampleLines) {
-      const candidates = [',',';','\t'];
-      const scores = {',':0,';':0,'\t':0};
+      const candidates = [',', ';', '\t'];
+      const scores = { ',': 0, ';': 0, '\t': 0 };
       const sampleCount = Math.min(sampleLines.length, 5);
-      for (let i=0;i<sampleCount;i++){
+      for (let i = 0; i < sampleCount; i++) {
         const ln = sampleLines[i];
         let inQ = false;
-        for (let j=0;j<ln.length;j++){
+        for (let j = 0; j < ln.length; j++) {
           const ch = ln[j];
           if (ch === '"') { inQ = !inQ; continue; }
           if (!inQ && scores.hasOwnProperty(ch)) scores[ch]++;
@@ -239,15 +239,15 @@ async function importCSV(e) {
       for (const c of candidates) if (scores[c] > scores[best]) best = c;
       return best;
     }
-    const delim = detectDelimiter(lines.slice(0, Math.min(lines.length,10)));
+    const delim = detectDelimiter(lines.slice(0, Math.min(lines.length, 10)));
     function parseCsvLine(line, d) {
       const fields = [];
       let cur = '';
       let inQuotes = false;
-      for (let i=0;i<line.length;i++){
+      for (let i = 0; i < line.length; i++) {
         const ch = line[i];
         if (ch === '"') {
-          if (inQuotes && line[i+1] === '"') { cur += '"'; i++; continue; }
+          if (inQuotes && line[i + 1] === '"') { cur += '"'; i++; continue; }
           inQuotes = !inQuotes;
           continue;
         }
@@ -255,7 +255,7 @@ async function importCSV(e) {
         cur += ch;
       }
       fields.push(cur);
-      return fields.map(f => f.replace(/^"|"$/g,'').trim());
+      return fields.map(f => f.replace(/^"|"$/g, '').trim());
     }
     const header = lines.shift();
     const headers = parseCsvLine(header, delim).map(h => h.toLowerCase().trim());
@@ -338,11 +338,9 @@ async function exportPDF() {
     } catch (e) { console.warn("logo add failed", e); }
   }
 
-
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
   doc.text("Workers Overtime Report", margin, cursorY + 8);
-
 
   const rawDate = document.getElementById("export-date-input").value;
   const ddmm = ddmmyyyyFromISO(rawDate);
@@ -351,46 +349,44 @@ async function exportPDF() {
 
   cursorY += 30;
 
+  const body = selected.map(r => [r.id, r.name, r.hours || "", r.position || ""]);
 
-  const body = selected.map(r => [r.id, r.name, r.position || "", r.hours || ""]);
+  doc.autoTable({
+    startY: cursorY,
+    head: [["PID","Name","Hours","Position"]],
+    body,
+    theme: "plain",
+    styles: {
+      fontSize: 11,
+      cellPadding: 8,
+      textColor: 20,
+      overflow: 'linebreak',
+      valign: 'middle'
+    },
+    headStyles: {
+      fillColor: [14, 165, 164],
+      textColor: 255,
+      fontStyle: 'bold'
+    },
+    alternateRowStyles: {
+      fillColor: [245, 250, 250]
+    },
+    columnStyles: {
+      1: { fontStyle: 'bold' }
+    },
+    tableLineColor: [220, 220, 225],
+    tableLineWidth: 0.4,
+    margin: { left: margin, right: margin },
 
-
-doc.autoTable({
-  startY: cursorY,
-  head: [["PID","Name","Position","Hours"]],
-  body,
-  theme: "plain", 
-  styles: {
-    fontSize: 11,
-    cellPadding: 8,
-    textColor: 20,
-    overflow: 'linebreak',
-    valign: 'middle'
-  },
-  headStyles: {
-    fillColor: [14,165,164], 
-    textColor: 255,
-    fontStyle: 'bold'
-  },
-  alternateRowStyles: {
-    fillColor: [245, 250, 250]
-  },
-  columnStyles: {
-    1: { fontStyle: 'bold' } 
-  },
-  tableLineColor: [220,220,225],
-  tableLineWidth: 0.4,
-  margin: { left: margin, right: margin },
-
-  didDrawPage: function (data) {
-    const pageCount = doc.internal.getNumberOfPages();
-    doc.setFontSize(9);
-    doc.setTextColor(110);
-    doc.text(`Generated on ${ddmm}`, margin, doc.internal.pageSize.getHeight() - 30);
-    const pageStr = `Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`;
-    doc.text(pageStr, pageWidth - margin - doc.getTextWidth(pageStr), doc.internal.pageSize.getHeight() - 30);
-  }
-});
+    didDrawPage: function (data) {
+      const pageCount = doc.internal.getNumberOfPages();
+      doc.setFontSize(9);
+      doc.setTextColor(110);
+      doc.text(`Generated on ${ddmm}`, margin, doc.internal.pageSize.getHeight() - 30);
+      const pageStr = `Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`;
+      doc.text(pageStr, pageWidth - margin - doc.getTextWidth(pageStr), doc.internal.pageSize.getHeight() - 30);
+    }
+  });
 
 
 
@@ -399,20 +395,17 @@ doc.autoTable({
   setStatus(`PDF exported as ${filename}`);
 }
 
-
-
 async function exportImage() {
   const selected = await loadSelected();
   if (!selected.length) { setStatus("No selected rows to export (image)", true); return; }
 
-
   const padding = 40;
-  const headerH = 110; 
+  const headerH = 110;
   const rowH = 28;
   const colWidths = [90, 190, 155, 90];
-  const contentW = colWidths.reduce((a,b)=>a+b,0);
-  const canvasW = Math.min(1123, contentW + padding*2); 
-  const canvasH = padding*2 + headerH + (selected.length * rowH) + 40;
+  const contentW = colWidths.reduce((a, b) => a + b, 0);
+  const canvasW = Math.min(1123, contentW + padding * 2);
+  const canvasH = padding * 2 + headerH + (selected.length * rowH) + 40;
 
   const canvas = document.createElement("canvas");
   canvas.width = canvasW;
@@ -421,23 +414,23 @@ async function exportImage() {
 
 
   ctx.fillStyle = "#fff";
-  ctx.fillRect(0,0,canvasW,canvasH);
+  ctx.fillRect(0, 0, canvasW, canvasH);
 
   let y = padding;
 
 
   const logoData = await loadLogo();
-  if(logoData){
-    await new Promise(res=>{
-      const img = new Image(); img.onload = ()=>{
+  if (logoData) {
+    await new Promise(res => {
+      const img = new Image(); img.onload = () => {
         const maxW = 320, maxH = 80;
-        let w=img.width, h=img.height; const ratio = Math.min(maxW/w, maxH/h, 1);
-        w*=ratio; h*=ratio;
-        const x = (canvasW - w)/2;
+        let w = img.width, h = img.height; const ratio = Math.min(maxW / w, maxH / h, 1);
+        w *= ratio; h *= ratio;
+        const x = (canvasW - w) / 2;
         ctx.drawImage(img, x, y, w, h);
         y += h + 10; res();
       };
-      img.onerror = ()=>{ res(); };
+      img.onerror = () => { res(); };
       img.src = logoData;
     });
   } else {
@@ -456,8 +449,8 @@ async function exportImage() {
   y += 30;
 
 
-  const tableX = padding; 
-  const tableW = canvasW - padding*2;
+  const tableX = padding;
+  const tableW = canvasW - padding * 2;
   ctx.fillStyle = "#e6f0fb";
   ctx.fillRect(tableX, y, tableW, rowH);
 
@@ -465,8 +458,8 @@ async function exportImage() {
   ctx.fillStyle = "#0b63b8";
   ctx.font = "600 12px Arial";
   let x = tableX;
-  const headers = ["PID","Name","Position","Hours"];
-  for(let i=0;i<headers.length;i++){
+  const headers = ["PID","Name","Hours","Position"];
+  for (let i = 0; i < headers.length; i++) {
     ctx.fillText(headers[i], x + 6, y + 18);
     x += colWidths[i];
   }
@@ -474,34 +467,27 @@ async function exportImage() {
 
 
   ctx.font = "12px Arial";
-  for(let i=0;i<selected.length;i++){
+  for (let i = 0; i < selected.length; i++) {
     const r = selected[i];
-    if(i%2===0){ ctx.fillStyle = "#ffffff"; } 
+    if (i % 2 === 0) { ctx.fillStyle = "#ffffff"; }
     else { ctx.fillStyle = "#f8fafc"; ctx.fillRect(tableX, y, tableW, rowH); }
 
     ctx.fillStyle = "#111827";
     x = tableX;
 
-
-    ctx.fillText(safeText(r.id), x + 6, y + 18); 
+    ctx.fillText(safeText(r.id), x + 6, y + 18);
     x += colWidths[0];
-
-
     drawWrapText(ctx, safeText(r.name), x + 6, y + 6, colWidths[1] - 12, 14);
     x += colWidths[1];
-
-
-    drawWrapText(ctx, safeText(r.position||""), x + 6, y + 6, colWidths[2] - 12, 14);
+    ctx.fillText(safeText(r.hours || ""), x + 6, y + 18);
+    drawWrapText(ctx, safeText(r.position || ""), x + 6, y + 6, colWidths[2] - 12, 14);
     x += colWidths[2];
-
-
-    ctx.fillText(safeText(r.hours||""), x + 6, y + 18);
 
     y += rowH;
   }
 
 
-  canvas.toBlob(blob=>{
+  canvas.toBlob(blob => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
     a.download = `workers-${ddmm}.png`;
@@ -510,12 +496,12 @@ async function exportImage() {
   }, "image/png", 1.0);
 
 
-  function drawWrapText(ctx, text, x, y, maxWidth, lineHeight){
+  function drawWrapText(ctx, text, x, y, maxWidth, lineHeight) {
     const words = text.split(/\s+/);
-    let line=""; let curY = y + 12;
-    for(let i=0;i<words.length;i++){
+    let line = ""; let curY = y + 12;
+    for (let i = 0; i < words.length; i++) {
       const test = line + words[i] + " ";
-      if(ctx.measureText(test).width > maxWidth && i>0){
+      if (ctx.measureText(test).width > maxWidth && i > 0) {
         ctx.fillText(line.trim(), x, curY);
         line = words[i] + " ";
         curY += lineHeight;
@@ -523,7 +509,7 @@ async function exportImage() {
         line = test;
       }
     }
-    if(line) ctx.fillText(line.trim(), x, curY);
+    if (line) ctx.fillText(line.trim(), x, curY);
   }
 }
 
@@ -538,14 +524,14 @@ async function init() {
     await renderSelectedTable();
     await renderLogo();
 
-  const dateInput = document.getElementById("export-date-input");
+    const dateInput = document.getElementById("export-date-input");
     const now = new Date();
     dateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
     const display = document.getElementById("export-date-display");
     if (display) display.textContent = ddmmyyyyFromISO(dateInput.value);
     dateInput.addEventListener("input", () => { if (display) display.textContent = ddmmyyyyFromISO(dateInput.value); });
 
-  document.getElementById("add-worker").onclick = addOrUpdateWorker;
+    document.getElementById("add-worker").onclick = addOrUpdateWorker;
     document.getElementById("delete-worker").onclick = deleteWorker;
     document.getElementById("clear-form").onclick = clearForm;
 
@@ -564,10 +550,10 @@ async function init() {
     document.getElementById("export-pdf").onclick = exportPDF;
     document.getElementById("export-image").onclick = exportImage;
 
-  document.getElementById("logo-input").onchange = (e) => { if (e.target.files && e.target.files[0]) handleLogoUpload(e.target.files[0]); };
+    document.getElementById("logo-input").onchange = (e) => { if (e.target.files && e.target.files[0]) handleLogoUpload(e.target.files[0]); };
     document.getElementById("clear-logo").onclick = async () => { await saveLogoDataUrl(null); await renderLogo(); setStatus("Logo cleared"); };
 
-  window.addEventListener("resize", () => { applyResponsiveActionStyle(); });
+    window.addEventListener("resize", () => { applyResponsiveActionStyle(); });
     applyResponsiveActionStyle();
     setStatus("Ready");
   } catch (err) {
