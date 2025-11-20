@@ -537,7 +537,7 @@ async function exportPDF() {
   }
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text(document.getElementById("export-title").textContent || "Today's Workers Overtime Sheet", margin, cursorY + 8);
+  doc.text(document.getElementById("export-title").textContent || "Workers Overtime Sheet - Mechanical Yard", margin, cursorY + 8);
   const rawDate = document.getElementById("export-date-input").value;
   const ddmm = ddmmyyyyFromISO(rawDate);
   doc.setFontSize(14);
