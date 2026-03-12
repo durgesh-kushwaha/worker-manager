@@ -21,6 +21,14 @@ const ADMIN_NAME = String(process.env.ADMIN_NAME || "Durgesh Admin").trim() || "
 
 app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: false, limit: "12mb" }));
+app.use("/api", async (req, res, next) => {
+  try {
+    await initializeApp();
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
 
 const userSchema = new mongoose.Schema(
   {
@@ -571,15 +579,6 @@ app.post("/api/admin/users/:id/reset-password", authMiddleware, adminOnly, async
 });
 
 app.use(express.static(publicDir));
-
-app.use(async (req, res, next) => {
-  try {
-    await initializeApp();
-    return next();
-  } catch (error) {
-    return next(error);
-  }
-});
 
 app.get("*", (req, res) => {
   res.sendFile(path.join(publicDir, "index.html"));
