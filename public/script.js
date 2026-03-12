@@ -1,5 +1,5 @@
 const TOKEN_KEY = "workerManagerAuthToken";
-const DEFAULT_LOGO_URL = "/assets/default-logo.svg";
+const DEFAULT_LOGO_URL = "/assets/mecc-logo.jpeg";
 
 const state = {
   token: localStorage.getItem(TOKEN_KEY) || "",
