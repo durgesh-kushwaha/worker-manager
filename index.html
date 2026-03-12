@@ -4,121 +4,275 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Worker Manager - Kanhaiya Kushwaha</title>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.28/jspdf.plugin.autotable.min.js"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <nav class="nav-bar">
-    <h1>Kanhaiya Kushwaha</h1>
-    <div class="nav-bar-info">Durgesh Kushwaha: durgeshcgc@gmail.com</div>
-  </nav>
-
-  <div class="container">
-    <section class="card sidebar">
-      <div class="form-section">
-        <h2>Company Logo</h2>
-        <input id="logo-input" type="file" accept="image/*" class="input-field file-input" />
-        <button id="clear-logo" class="btn btn-danger-500 mt-3">Remove Logo</button>
+  <main id="auth-view" class="auth-shell">
+    <section class="auth-brand">
+      <p class="eyebrow">MongoDB + Admin Access</p>
+      <h1>Worker Manager</h1>
+      <p class="auth-copy">
+        Manage workers, overtime reports, and MongoDB records from one place.
+      </p>
+      <div class="auth-feature-list">
+        <span class="auth-feature-pill">Mobile-first workflow</span>
+        <span class="auth-feature-pill">MongoDB sync</span>
+        <span class="auth-feature-pill">PDF and PNG exports</span>
       </div>
-
-      <div class="form-section">
-        <h2>Add / Update Worker</h2>
-        <div class="input-stack">
-          <input id="worker-id" placeholder="Worker ID" class="input-field" />
-          <input id="worker-name" placeholder="Full Name" class="input-field" />
-          <input id="worker-position" placeholder="Position" class="input-field" />
-          <input id="worker-hours" placeholder="Work Hours" type="number" class="input-field" />
-          <div class="input-group">
-            <button id="add-worker" class="btn btn-primary btn-flex">Save Worker</button>
-            <button id="delete-worker" class="btn btn-danger-600 btn-flex">Delete</button>
-          </div>
-          <button id="clear-form" class="btn btn-secondary">Clear</button>
-        </div>
-      </div>
-
-      <div class="form-section">
-        <h2>Select Worker</h2>
-        <select id="workers-dropdown" class="input-field">
-          <option value="">-- Select a worker to add to list --</option>
-        </select>
-        <div class="input-group mt-3">
-          <button id="add-selected" class="btn btn-success btn-flex">Add to List</button>
-          <button id="clear-list" class="btn btn-gray-400 btn-flex">Clear List</button>
-        </div>
-        <button id="add-all-workers" class="btn btn-indigo mt-3">Add All Workers to List</button>
-      </div>
-
-      <div class="form-section">
-        <h2>Bulk Edit Hours</h2>
-        <div class="input-stack">
-          <input id="bulk-hours-input" type="number" placeholder="Set hours (e.g. 8)" class="input-field" />
-          <div class="checkbox-group">
-            <input id="bulk-only-selected" type="checkbox" />
-            <label for="bulk-only-selected">Apply only to today's list (unchecked = all workers)</label>
-          </div>
-          <div class="input-group">
-            <button id="apply-bulk-hours" class="btn btn-warning btn-flex">Apply Hours</button>
-            <button id="increment-bulk-hours" class="btn btn-emerald btn-flex">Add +1 Hour</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="form-section">
-        <h2>CSV Backup</h2>
-        <div class="input-stack">
-          <button id="export-csv" class="btn btn-indigo">Export CSV</button>
-          <input id="import-csv" type="file" accept=".csv,text/csv,text/plain,*/*" class="input-field file-input" />
-        </div>
-      </div>
-
-      <div class="status-bar" id="status">Ready</div>
-    </section>
-
-    <section class="main-content">
-      <div id="export-area" class="card card-p6">
-        <div id="logo-area"></div>
-
-        <div class="date-controls">
-          <label>Date:</label>
-          <input id="export-date-input" class="input-field" type="date" style="width: auto;" />
-        </div>
-
-        <p id="export-date-display"></p>
-
-        <h2 id="export-title">Workers Overtime Sheet - Mechanical Yard</h2>
-
-        <div id="selected-list-container" class="table-wrapper">
-          <table id="selected-table" class="data-table">
-            <thead class="table-header">
-              <tr>
-                <th>PID</th>
-                <th>Name</th>
-                <th>Hours</th>
-                <th>Position</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="export-buttons-group">
-        <button id="export-pdf" class="btn-emerald">Export PDF</button>
-        <button id="export-image" class="btn-warning">Export Image</button>
-        <button id="download-json" class="btn-gray-700">Backup JSON</button>
-        <button id="clear-storage" class="btn-danger-500">Clear All Data</button>
+      <div class="auth-owner-card">
+        <p class="auth-owner-label">Created and managed by</p>
+        <strong>Durgesh Kushwaha</strong>
+        <a href="mailto:durgeshcgc@gmail.com">durgeshcgc@gmail.com</a>
+        <a href="https://www.linkedin.com/in/durgesh-kushwaha/" target="_blank" rel="noreferrer">LinkedIn: durgesh-kushwaha</a>
       </div>
     </section>
+
+    <section class="auth-card">
+      <div class="auth-toggle">
+        <button id="show-login" class="auth-tab active" type="button">Login</button>
+        <button id="show-signup" class="auth-tab" type="button">Sign Up</button>
+      </div>
+
+      <form id="login-form" class="auth-form">
+        <label class="field-label" for="login-email">Email</label>
+        <input id="login-email" class="input-field" type="email" placeholder="you@example.com" required />
+
+        <label class="field-label" for="login-password">Password</label>
+        <input id="login-password" class="input-field" type="password" placeholder="Enter password" required />
+
+        <button class="btn btn-primary" type="submit">Login</button>
+      </form>
+
+      <form id="signup-form" class="auth-form hidden">
+        <label class="field-label" for="signup-name">Full Name</label>
+        <input id="signup-name" class="input-field" type="text" placeholder="Enter your name" required />
+
+        <label class="field-label" for="signup-email">Email</label>
+        <input id="signup-email" class="input-field" type="email" placeholder="you@example.com" required />
+
+        <label class="field-label" for="signup-password">Password</label>
+        <input id="signup-password" class="input-field" type="password" placeholder="Minimum 6 characters" required />
+
+        <button class="btn btn-success" type="submit">Create Account</button>
+      </form>
+
+      <div id="auth-status" class="status-bar">Ready</div>
+    </section>
+  </main>
+
+  <div id="app-view" class="app-shell hidden">
+    <nav class="nav-bar">
+      <div>
+        <p class="eyebrow">Kanhaiya Kushwaha</p>
+        <h1>Worker Manager</h1>
+      </div>
+
+      <div class="nav-side">
+        <div class="nav-user">
+          <strong id="nav-user-name">User</strong>
+          <span id="nav-user-email">user@example.com</span>
+        </div>
+        <span id="nav-user-role" class="role-badge">user</span>
+        <button id="logout-btn" class="btn btn-secondary btn-auto" type="button">Logout</button>
+      </div>
+    </nav>
+
+    <div class="container">
+      <section class="card sidebar">
+        <div class="form-section">
+          <h2>Account Settings</h2>
+          <div class="account-summary">
+            <strong id="account-name">User</strong>
+            <span id="account-email">user@example.com</span>
+          </div>
+          <button id="open-change-password" class="btn btn-primary" type="button">Change Password</button>
+        </div>
+
+        <div class="form-section">
+          <h2>Company Logo</h2>
+          <input id="logo-input" type="file" accept="image/*" class="input-field file-input" />
+          <button id="clear-logo" class="btn btn-danger-500 mt-3" type="button">Reset to Default Logo</button>
+        </div>
+
+        <div class="form-section">
+          <h2>Add / Update Worker</h2>
+          <div class="input-stack">
+            <input id="worker-db-id" type="hidden" />
+            <input id="worker-id" placeholder="Worker ID / PID" class="input-field" />
+            <input id="worker-name" placeholder="Full Name" class="input-field" />
+            <input id="worker-position" placeholder="Position" class="input-field" />
+            <input id="worker-hours" placeholder="Work Hours" type="number" min="0" step="0.5" class="input-field" />
+            <div class="input-group">
+              <button id="add-worker" class="btn btn-primary btn-flex" type="button">Save Worker</button>
+              <button id="delete-worker" class="btn btn-danger-600 btn-flex" type="button">Delete</button>
+            </div>
+            <button id="clear-form" class="btn btn-secondary" type="button">Clear</button>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h2>Select Worker</h2>
+          <select id="workers-dropdown" class="input-field">
+            <option value="">-- Select a worker to add to list --</option>
+          </select>
+          <div class="input-group mt-3">
+            <button id="add-selected" class="btn btn-success btn-flex" type="button">Add to List</button>
+            <button id="clear-list" class="btn btn-gray-400 btn-flex" type="button">Clear List</button>
+          </div>
+          <button id="add-all-workers" class="btn btn-indigo mt-3" type="button">Add All Workers to List</button>
+        </div>
+
+        <div class="form-section">
+          <h2>Bulk Edit Hours</h2>
+          <div class="input-stack">
+            <input id="bulk-hours-input" type="number" min="0" step="0.5" placeholder="Set hours (e.g. 8)" class="input-field" />
+            <div class="checkbox-group">
+              <input id="bulk-only-selected" type="checkbox" />
+              <label for="bulk-only-selected">Apply only to this date's selected workers</label>
+            </div>
+            <div class="input-group">
+              <button id="apply-bulk-hours" class="btn btn-warning btn-flex" type="button">Apply Hours</button>
+              <button id="increment-bulk-hours" class="btn btn-emerald btn-flex" type="button">Add +1 Hour</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <h2>CSV Backup</h2>
+          <div class="input-stack">
+            <button id="export-csv" class="btn btn-indigo" type="button">Export CSV</button>
+            <input id="import-csv" type="file" accept=".csv,text/csv,text/plain,*/*" class="input-field file-input" />
+          </div>
+        </div>
+
+        <div class="status-bar" id="status">Ready</div>
+      </section>
+
+      <section class="main-content">
+        <div id="export-area" class="card card-p6">
+          <div class="report-header">
+            <div id="logo-area" class="logo-area"></div>
+            <div class="report-header-copy">
+              <div class="date-controls">
+                <label for="export-date-input">Date:</label>
+                <input id="export-date-input" class="input-field compact-date" type="date" />
+              </div>
+              <p id="export-date-display"></p>
+              <h2 id="export-title">Workers Overtime Sheet - Mechanical Yard</h2>
+            </div>
+          </div>
+
+          <div class="table-tools">
+            <input id="selected-search" placeholder="Search worker ID, name, or position" class="input-field" />
+            <button id="selected-refresh" class="btn btn-secondary btn-auto" type="button">Refresh</button>
+          </div>
+
+          <div id="selected-list-container" class="table-wrapper">
+            <table id="selected-table" class="data-table">
+              <thead class="table-header">
+                <tr>
+                  <th data-sort-key="workerId">PID</th>
+                  <th data-sort-key="name">Name</th>
+                  <th data-sort-key="hours">Hours</th>
+                  <th data-sort-key="position">Position</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="export-buttons-group">
+          <button id="export-pdf" class="btn-emerald" type="button">Export PDF</button>
+          <button id="export-image" class="btn-warning" type="button">Export Image</button>
+          <button id="download-json" class="btn-gray-700" type="button">Backup JSON</button>
+          <button id="clear-storage" class="btn-danger-500" type="button">Clear My Data</button>
+        </div>
+
+        <section id="admin-panel" class="card admin-panel hidden">
+          <div class="admin-panel-header">
+            <div>
+              <p class="eyebrow">Admin Panel</p>
+              <h2>User Management</h2>
+            </div>
+            <p class="admin-panel-copy">Create users and reset passwords from the configured admin account.</p>
+          </div>
+
+          <div class="admin-layout">
+            <form id="admin-create-user-form" class="admin-form">
+              <h3>Add User</h3>
+              <input id="admin-user-name" class="input-field" type="text" placeholder="Full name" required />
+              <input id="admin-user-email" class="input-field" type="email" placeholder="Email address" required />
+              <input id="admin-user-password" class="input-field" type="password" placeholder="Temporary password" required />
+              <button class="btn btn-primary" type="submit">Create User</button>
+            </form>
+
+            <div class="admin-users">
+              <div class="table-wrapper">
+                <table id="users-table" class="data-table users-table">
+                  <thead class="table-header">
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Joined</th>
+                      <th>Password</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </div>
+
+    <footer class="app-footer">
+      Managed by Durgesh Kushwaha
+    </footer>
+  </div>
+
+  <div id="password-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-close-password-modal="true"></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="password-modal-title">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Security</p>
+          <h2 id="password-modal-title">Change Password</h2>
+          <p id="password-modal-copy" class="modal-copy">Enter your current password and choose a new one.</p>
+        </div>
+        <button id="close-password-modal" class="modal-close" type="button" aria-label="Close password dialog">×</button>
+      </div>
+
+      <form id="password-modal-form" class="input-stack">
+        <div id="current-password-group" class="input-stack">
+          <label class="field-label" for="modal-old-password">Current Password</label>
+          <input id="modal-old-password" class="input-field" type="password" autocomplete="current-password" />
+        </div>
+
+        <div class="input-stack">
+          <label class="field-label" for="modal-new-password">New Password</label>
+          <input id="modal-new-password" class="input-field" type="password" autocomplete="new-password" required />
+        </div>
+
+        <div class="input-stack">
+          <label class="field-label" for="modal-confirm-password">Confirm Password</label>
+          <input id="modal-confirm-password" class="input-field" type="password" autocomplete="new-password" required />
+        </div>
+
+        <div class="modal-actions">
+          <button id="password-modal-cancel" class="btn btn-secondary btn-auto" type="button">Cancel</button>
+          <button id="password-modal-submit" class="btn btn-primary btn-auto" type="submit">Update Password</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <script src="script.js" defer></script>
-
-  <footer class="app-footer">
-    Made with ❤️ by Durgesh Kushwaha - <a href="mailto:durgeshcgc@gmail.com">durgeshcgc@gmail.com</a>
-  </footer>
 </body>
 </html>

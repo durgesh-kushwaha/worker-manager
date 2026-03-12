@@ -1,781 +1,1239 @@
-const WORKERS_KEY = "workers";
-const SELECTED_KEY = "selectedWorkers";
-const LOGO_KEY = "companyLogo";
-localforage.config({ name: "modern-worker-manager" });
+const TOKEN_KEY = "workerManagerAuthToken";
+const DEFAULT_LOGO_URL = "/assets/default-logo.svg";
 
-function setStatus(msg = "", isError = false) {
-  const el = document.getElementById("status");
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = isError ? "crimson" : "";
+const state = {
+  token: localStorage.getItem(TOKEN_KEY) || "",
+  currentUser: null,
+  workers: [],
+  selectedWorkerIds: [],
+  adminUsers: [],
+  passwordDialog: { mode: "", userId: "", userName: "" },
+  currentFilter: "",
+  currentSort: { key: null, dir: 1 }
+};
+
+function el(id) {
+  return document.getElementById(id);
 }
 
-function safeText(s) {
-  return s === undefined || s === null ? "" : String(s);
+function safeText(value) {
+  return value === undefined || value === null ? "" : String(value);
+}
+
+function escapeHtml(value) {
+  return safeText(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function todayIso() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 }
 
 function ddmmyyyyFromISO(iso) {
   if (!iso) {
-    const d = new Date();
-    return `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`;
+    return ddmmyyyyFromISO(todayIso());
   }
   if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
-    const [y, m, d] = iso.split("-");
-    return `${d}-${m}-${y}`;
+    const [year, month, day] = iso.split("-");
+    return `${day}-${month}-${year}`;
   }
-  if (/^\d{2}-\d{2}-\d{4}$/.test(iso)) return iso;
-  const d = new Date(iso);
-  if (!isNaN(d)) return `${String(d.getDate()).padStart(2, "0")}-${String(d.getMonth() + 1).padStart(2, "0")}-${d.getFullYear()}`;
-  return iso;
+  const date = new Date(iso);
+  if (!Number.isNaN(date.getTime())) {
+    return `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}`;
+  }
+  return safeText(iso);
 }
 
-async function loadWorkers() {
-  const v = await localforage.getItem(WORKERS_KEY);
-  return Array.isArray(v) ? v : [];
-}
-async function saveWorkers(list) {
-  await localforage.setItem(WORKERS_KEY, Array.isArray(list) ? list : []);
-  await populateDropdown();
-}
-async function loadSelected() {
-  const v = await localforage.getItem(SELECTED_KEY);
-  return Array.isArray(v) ? v : [];
-}
-async function saveSelected(list) {
-  await localforage.setItem(SELECTED_KEY, Array.isArray(list) ? list : []);
-  await renderSelectedTable();
-}
-async function loadLogo() {
-  return await localforage.getItem(LOGO_KEY);
-}
-async function saveLogoDataUrl(dataUrl) {
-  if (!dataUrl) await localforage.removeItem(LOGO_KEY);
-  else await localforage.setItem(LOGO_KEY, dataUrl);
+function formatHours(value) {
+  const hours = Number(value || 0);
+  if (!Number.isFinite(hours)) return "0";
+  return Number.isInteger(hours) ? String(hours) : String(hours.toFixed(2)).replace(/\.?0+$/, "");
 }
 
-async function populateDropdown() {
-  const dd = document.getElementById("workers-dropdown");
-  if (!dd) return;
-  const workers = await loadWorkers();
-  dd.innerHTML = `<option value="">-- Select a worker to add to list --</option>`;
-  workers.forEach(w => {
-    const opt = document.createElement("option");
-    opt.value = w.id;
-    opt.textContent = `${w.name} (${w.id})`;
-    dd.appendChild(opt);
-  });
+function formatJoinedDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function clearForm() {
-  ["worker-id", "worker-name", "worker-position", "worker-hours"].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.value = "";
-  });
+function normalizeHours(value) {
+  const hours = Number(value);
+  if (!Number.isFinite(hours) || hours < 0) return 0;
+  return hours;
 }
 
-async function addOrUpdateWorker() {
-  const id = (document.getElementById("worker-id").value || "").trim();
-  const name = (document.getElementById("worker-name").value || "").trim();
-  const position = (document.getElementById("worker-position").value || "").trim();
-  const hours = (document.getElementById("worker-hours").value || "").trim();
-  if (!id || !name) {
-    setStatus("ID & Name required", true);
-    return;
-  }
-  const workers = await loadWorkers();
-  const idx = workers.findIndex(w => w.id === id);
-  const rec = { id, name, position, hours };
-  if (idx >= 0) workers[idx] = rec;
-  else workers.push(rec);
-  await saveWorkers(workers);
-  setStatus(idx >= 0 ? "Worker updated" : "Worker added");
-  clearForm();
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function deleteWorker() {
-  const id = (document.getElementById("worker-id").value || "").trim();
-  if (!id) {
-    setStatus("Enter ID to delete", true);
-    return;
-  }
-  let workers = await loadWorkers();
-  const before = workers.length;
-  workers = workers.filter(w => w.id !== id);
-  if (workers.length === before) {
-    setStatus("Worker not found", true);
-    return;
-  }
-  await saveWorkers(workers);
-  setStatus("Worker deleted");
-  clearForm();
+function setStatus(message = "", isError = false, targetId = "status") {
+  const target = el(targetId);
+  if (!target) return;
+  target.textContent = message;
+  target.classList.toggle("is-error", Boolean(isError));
 }
 
-async function addToSelected() {
-  const selId = (document.getElementById("workers-dropdown").value || "").trim();
-  if (!selId) {
-    setStatus("Select a worker to add", true);
-    return;
-  }
-  const workers = await loadWorkers();
-  const w = workers.find(x => x.id === selId);
-  if (!w) {
-    setStatus("Worker not found", true);
-    return;
-  }
-  const list = await loadSelected();
-  if (list.find(x => x.id === w.id)) {
-    setStatus("Already in list");
-    return;
-  }
-  list.push(w);
-  await saveSelected(list);
-  setStatus("Added to list");
+function clearPasswordModalFields() {
+  el("password-modal-form").reset();
 }
 
-async function clearSelected() {
-  await saveSelected([]);
-  setStatus("Selected list cleared");
+function closePasswordModal() {
+  state.passwordDialog = { mode: "", userId: "", userName: "" };
+  clearPasswordModalFields();
+  el("password-modal").classList.add("hidden");
+  el("password-modal").setAttribute("aria-hidden", "true");
+  document.body.classList.remove("modal-open");
 }
 
-async function addAllWorkersToSelected() {
-  const workers = await loadWorkers();
-  if (!workers || workers.length === 0) {
-    setStatus("No stored workers to add", true);
-    return;
-  }
-  const selected = await loadSelected();
-  let added = 0;
-  for (const w of workers) {
-    if (!selected.find(s => s.id === w.id)) {
-      selected.push(w);
-      added++;
-    }
-  }
-  if (added > 0) {
-    await saveSelected(selected);
-    setStatus(`Added ${added} worker${added > 1 ? "s" : ""} to the list`);
+function openPasswordModal({ mode, userId = "", userName = "" }) {
+  state.passwordDialog = { mode, userId, userName };
+  clearPasswordModalFields();
+
+  const isSelf = mode === "self";
+  el("password-modal-title").textContent = isSelf ? "Change Password" : "Reset Password";
+  el("password-modal-copy").textContent = isSelf
+    ? "Enter your current password and choose a new one."
+    : `Set a new password for ${userName || "this user"}.`;
+  el("current-password-group").classList.toggle("hidden", !isSelf);
+  el("modal-old-password").required = isSelf;
+  el("password-modal-submit").textContent = isSelf ? "Update Password" : "Reset Password";
+  el("password-modal").classList.remove("hidden");
+  el("password-modal").setAttribute("aria-hidden", "false");
+  document.body.classList.add("modal-open");
+
+  if (isSelf) {
+    el("modal-old-password").focus();
   } else {
-    setStatus("All workers already in the list");
+    el("modal-new-password").focus();
   }
 }
 
-async function applyBulkHours() {
-  const raw = document.getElementById("bulk-hours-input").value;
-  const onlySelected = document.getElementById("bulk-only-selected").checked;
-  const value = Number(raw);
-  if (isNaN(value)) {
-    setStatus("Enter valid hours", true);
-    return;
-  }
-  if (onlySelected) {
-    const sel = await loadSelected();
-    if (!sel.length) {
-      setStatus("Selected list empty", true);
-      return;
-    }
-    for (const s of sel) s.hours = String(value);
-    await saveSelected(sel);
-    let workers = await loadWorkers();
-    workers = workers.map(w => {
-      const m = sel.find(x => x.id === w.id);
-      return m ? { ...w, hours: m.hours } : w;
-    });
-    await saveWorkers(workers);
-    setStatus("Applied hours to selected list (overwritten)");
-    return;
+function persistToken(token) {
+  state.token = token || "";
+  if (state.token) {
+    localStorage.setItem(TOKEN_KEY, state.token);
   } else {
-    const workers = await loadWorkers();
-    for (const w of workers) w.hours = String(value);
-    await saveWorkers(workers);
-    const sel = await loadSelected();
-    const updatedSel = sel.map(s => {
-      const m = workers.find(w => w.id === s.id);
-      return m ? { ...s, hours: m.hours } : s;
-    });
-    await saveSelected(updatedSel);
-    setStatus("Applied hours to all workers (overwritten)");
-    return;
+    localStorage.removeItem(TOKEN_KEY);
   }
 }
 
-async function incrementBulkHours() {
-  const onlySelected = document.getElementById("bulk-only-selected").checked;
-  if (onlySelected) {
-    const sel = await loadSelected();
-    if (!sel.length) {
-      setStatus("Selected list empty", true);
-      return;
-    }
-    for (const s of sel) s.hours = String(Math.max(0, Number(s.hours || 0) + 1));
-    await saveSelected(sel);
-    let workers = await loadWorkers();
-    workers = workers.map(w => {
-      const m = sel.find(x => x.id === w.id);
-      return m ? { ...w, hours: m.hours } : w;
-    });
-    await saveWorkers(workers);
-    setStatus("Added +1 hour to selected list");
-    return;
-  } else {
-    const workers = await loadWorkers();
-    for (const w of workers) w.hours = String(Math.max(0, Number(w.hours || 0) + 1));
-    await saveWorkers(workers);
-    const sel = await loadSelected();
-    const updatedSel = sel.map(s => {
-      const m = workers.find(w => w.id === s.id);
-      return m ? { ...s, hours: m.hours } : s;
-    });
-    await saveSelected(updatedSel);
-    setStatus("Added +1 hour to all workers");
+function setCurrentUser(user) {
+  state.currentUser = user || null;
+  const appVisible = Boolean(state.currentUser);
+
+  el("auth-view").classList.toggle("hidden", appVisible);
+  el("app-view").classList.toggle("hidden", !appVisible);
+
+  if (!state.currentUser) {
+    closePasswordModal();
+    el("admin-panel").classList.add("hidden");
     return;
   }
+
+  el("nav-user-name").textContent = state.currentUser.name;
+  el("nav-user-email").textContent = state.currentUser.email;
+  el("nav-user-role").textContent = state.currentUser.role;
+  el("account-name").textContent = state.currentUser.name;
+  el("account-email").textContent = state.currentUser.email;
+  el("nav-user-role").classList.toggle("role-admin", state.currentUser.role === "admin");
+  el("admin-panel").classList.toggle("hidden", state.currentUser.role !== "admin");
+  renderLogo();
 }
 
-async function removeSelectedById(id) {
-  let list = await loadSelected();
-  list = list.filter(x => x.id !== id);
-  await saveSelected(list);
-  setStatus("Removed from list");
+function showAuthPanel(panel) {
+  const isLogin = panel !== "signup";
+  el("login-form").classList.toggle("hidden", !isLogin);
+  el("signup-form").classList.toggle("hidden", isLogin);
+  el("show-login").classList.toggle("active", isLogin);
+  el("show-signup").classList.toggle("active", !isLogin);
 }
 
-let currentFilter = "";
-let currentSort = { col: null, dir: 1 };
+function getReportDate() {
+  return el("export-date-input").value || todayIso();
+}
 
-function ensureSearchBar() {
-  const container = document.getElementById("selected-list-container");
-  if (!container) return;
-  if (document.getElementById("selected-search")) return;
-  const wrapper = document.createElement("div");
-  wrapper.className = "p-2 flex gap-2 items-center";
-  wrapper.innerHTML = `<input id="selected-search" placeholder="Search ID or name..." class="p-2 border rounded flex-1" />
-    <button id="selected-refresh" class="bg-gray-200 px-3 py-1 rounded">Refresh</button>`;
-  container.parentNode.insertBefore(wrapper, container);
-  document.getElementById("selected-search").addEventListener("input", e => {
-    currentFilter = e.target.value.trim().toLowerCase();
-    renderSelectedTable();
+function updateDateDisplay() {
+  el("export-date-display").textContent = `Report Date: ${ddmmyyyyFromISO(getReportDate())}`;
+}
+
+function currentLogoSource() {
+  return safeText(state.currentUser?.logoDataUrl) || DEFAULT_LOGO_URL;
+}
+
+async function apiRequest(path, options = {}) {
+  const { method = "GET", body, auth = true } = options;
+  const headers = {};
+
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  if (auth && state.token) {
+    headers.Authorization = `Bearer ${state.token}`;
+  }
+
+  const response = await fetch(path, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined
   });
-  document.getElementById("selected-refresh").addEventListener("click", () => {
-    renderSelectedTable();
-    setStatus("Refreshed");
-  });
-}
 
-function applyResponsiveActionStyle() {
-  const isSmall = window.matchMedia("(max-width:640px)").matches;
-  document.querySelectorAll("#selected-table .action-group").forEach(div => {
-    if (isSmall) {
-      div.classList.add("flex", "flex-col", "gap-2");
-      div.querySelectorAll("button").forEach(b => {
-        b.classList.add("w-full");
-      });
-    } else {
-      div.classList.remove("flex", "flex-col", "gap-2");
-      div.querySelectorAll("button").forEach(b => {
-        b.classList.remove("w-full");
-      });
+  const text = await response.text();
+  let payload = {};
+
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch (error) {
+      payload = { message: text };
     }
+  }
+
+  if (!response.ok) {
+    if (response.status === 401 && auth) {
+      persistToken("");
+      setCurrentUser(null);
+      setStatus(payload.message || "Session expired. Please login again.", true, "auth-status");
+      showAuthPanel("login");
+    }
+    throw new Error(payload.message || "Request failed.");
+  }
+
+  return payload;
+}
+
+function renderLogo() {
+  const area = el("logo-area");
+  if (!area) return;
+
+  area.innerHTML = "";
+  const image = document.createElement("img");
+  image.src = currentLogoSource();
+  image.alt = "Company logo";
+  area.appendChild(image);
+}
+
+function renderWorkersDropdown() {
+  const dropdown = el("workers-dropdown");
+  dropdown.innerHTML = '<option value="">-- Select a worker to add to list --</option>';
+
+  state.workers.forEach((worker) => {
+    const option = document.createElement("option");
+    option.value = worker._id;
+    option.textContent = `${worker.name} (${worker.workerId})`;
+    dropdown.appendChild(option);
   });
 }
 
-async function renderSelectedTable() {
-  ensureSearchBar();
+function getSelectedWorkers() {
+  return state.selectedWorkerIds
+    .map((id) => state.workers.find((worker) => worker._id === id))
+    .filter(Boolean);
+}
+
+function renderSelectedTable() {
   const tbody = document.querySelector("#selected-table tbody");
-  if (!tbody) return;
-  const list = await loadSelected();
-  let rows = list.filter(r => {
-    if (!currentFilter) return true;
-    return (r.id || "").toLowerCase().includes(currentFilter) || (r.name || "").toLowerCase().includes(currentFilter) || (r.position || "").toLowerCase().includes(currentFilter);
-  });
-  if (currentSort.col) {
-    rows.sort((a, b) => {
-      const A = safeText(a[currentSort.col]).toLowerCase();
-      const B = safeText(b[currentSort.col]).toLowerCase();
-      if (A < B) return -1 * currentSort.dir;
-      if (A > B) return 1 * currentSort.dir;
+  let rows = getSelectedWorkers();
+
+  if (state.currentFilter) {
+    const filter = state.currentFilter.toLowerCase();
+    rows = rows.filter((row) => {
+      return (
+        safeText(row.workerId).toLowerCase().includes(filter) ||
+        safeText(row.name).toLowerCase().includes(filter) ||
+        safeText(row.position).toLowerCase().includes(filter)
+      );
+    });
+  }
+
+  if (state.currentSort.key) {
+    rows.sort((left, right) => {
+      const leftValue = state.currentSort.key === "hours" ? Number(left.hours || 0) : safeText(left[state.currentSort.key]).toLowerCase();
+      const rightValue = state.currentSort.key === "hours" ? Number(right.hours || 0) : safeText(right[state.currentSort.key]).toLowerCase();
+      if (leftValue < rightValue) return -1 * state.currentSort.dir;
+      if (leftValue > rightValue) return 1 * state.currentSort.dir;
       return 0;
     });
   }
-  tbody.innerHTML = "";
-  rows.forEach(w => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td class="p-3 border">${w.id}</td>
-      <td class="p-3 border">${w.name}</td>
-      <td class="p-3 border">${w.hours || ""}</td>
-      <td class="p-3 border">${w.position || ""}</td>
-      <td class="p-3 border">
-        <div class="action-group">
-          <button class="edit-btn bg-blue-500 text-white px-3 py-1 rounded text-sm" data-id="${w.id}">Edit</button>
-          <button class="remove-btn bg-red-500 text-white px-3 py-1 rounded text-sm ml-2" data-id="${w.id}">Remove</button>
-        </div>
-      </td>`;
-    tbody.appendChild(tr);
-  });
-  tbody.querySelectorAll(".remove-btn").forEach(btn => btn.addEventListener("click", async e => {
-    const id = e.currentTarget.getAttribute("data-id");
-    await removeSelectedById(id);
-  }));
-  tbody.querySelectorAll(".edit-btn").forEach(btn => btn.addEventListener("click", async e => {
-    const id = e.currentTarget.getAttribute("data-id");
-    const workers = await loadWorkers();
-    const w = workers.find(x => x.id === id);
-    if (!w) {
-      setStatus("Worker record not found", true);
-      return;
-    }
-    document.getElementById("worker-id").value = w.id;
-    document.getElementById("worker-name").value = w.name;
-    document.getElementById("worker-position").value = w.position || "";
-    document.getElementById("worker-hours").value = w.hours || "";
-    setStatus("Editing worker — update fields and click Save");
-  }));
-  const headers = document.querySelectorAll("#selected-table thead th");
-  headers.forEach((th, idx) => {
-    const keyMap = ["id", "name", "hours", "position"];
-    const colKey = keyMap[idx];
-    if (!colKey) return;
-    th.style.cursor = "pointer";
-    th.onmouseenter = () => th.style.background = "#f3f4f6";
-    th.onmouseleave = () => th.style.background = "";
-    th.onclick = () => {
-      if (currentSort.col === colKey) currentSort.dir = -currentSort.dir;
-      else {
-        currentSort.col = colKey;
-        currentSort.dir = 1;
-      }
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="5" class="empty-state">No selected workers for this report date.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows
+    .map((worker) => {
+      return `
+        <tr>
+          <td data-label="PID">${escapeHtml(worker.workerId)}</td>
+          <td data-label="Name">${escapeHtml(worker.name)}</td>
+          <td data-label="Hours">${formatHours(worker.hours)}</td>
+          <td data-label="Position">${escapeHtml(worker.position)}</td>
+          <td data-label="Action">
+            <div class="action-group">
+              <button class="edit-btn" type="button" data-worker-id="${worker._id}">Edit</button>
+              <button class="remove-btn" type="button" data-remove-id="${worker._id}">Remove</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tbody.querySelectorAll("[data-remove-id]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      const workerId = event.currentTarget.getAttribute("data-remove-id");
+      state.selectedWorkerIds = state.selectedWorkerIds.filter((id) => id !== workerId);
+      await saveReportSelection(state.selectedWorkerIds, { silent: true });
       renderSelectedTable();
-    };
+      setStatus("Removed worker from the report list.");
+    });
   });
-  applyResponsiveActionStyle();
+
+  tbody.querySelectorAll("[data-worker-id]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const workerId = event.currentTarget.getAttribute("data-worker-id");
+      const worker = state.workers.find((item) => item._id === workerId);
+      if (!worker) {
+        setStatus("Worker record not found.", true);
+        return;
+      }
+      fillWorkerForm(worker);
+      setStatus("Worker loaded into the form for editing.");
+    });
+  });
 }
 
-async function exportCSV() {
-  const workers = await loadWorkers();
-  if (!workers.length) {
-    setStatus("No workers to export", true);
+function renderAdminUsers() {
+  const tbody = document.querySelector("#users-table tbody");
+  if (!tbody) return;
+
+  if (!state.currentUser || state.currentUser.role !== "admin") {
+    tbody.innerHTML = "";
     return;
   }
-  const header = ["id", "name", "position", "hours"].join(",");
-  const rows = workers.map(w => [w.id, w.name, w.position, w.hours].map(x => `"${(x || "").toString().replace(/"/g, '""')}"`).join(","));
-  const csv = [header, ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "workers.csv";
-  a.click();
-  setStatus("CSV exported");
+
+  tbody.innerHTML = state.adminUsers
+    .map((user) => {
+      const isCurrentUser = user.id === state.currentUser?.id;
+      return `
+        <tr>
+          <td data-label="Name">${escapeHtml(user.name)}</td>
+          <td data-label="Email">${escapeHtml(user.email)}</td>
+          <td data-label="Role"><span class="role-chip ${user.role === "admin" ? "role-admin-chip" : ""}">${escapeHtml(user.role)}</span></td>
+          <td data-label="Joined">${formatJoinedDate(user.createdAt)}</td>
+          <td data-label="Password">
+            <div class="password-reset-row">
+              ${
+                isCurrentUser
+                  ? `<span class="inline-note">Use Account Settings to change your password.</span>`
+                  : `<button class="btn btn-primary btn-small" type="button" data-reset-user="${user.id}" data-user-name="${escapeHtml(user.name)}">Reset Password</button>`
+              }
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  tbody.querySelectorAll("[data-reset-user]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      const userId = event.currentTarget.getAttribute("data-reset-user");
+      const userName = event.currentTarget.getAttribute("data-user-name") || "this user";
+      openPasswordModal({ mode: "admin", userId, userName });
+    });
+  });
 }
 
-async function importCSV(e) {
-  const file = e?.target?.files?.[0];
-  if (!file) {
-    setStatus("No file selected", true);
+function clearWorkerForm() {
+  el("worker-db-id").value = "";
+  el("worker-id").value = "";
+  el("worker-name").value = "";
+  el("worker-position").value = "";
+  el("worker-hours").value = "";
+}
+
+function fillWorkerForm(worker) {
+  el("worker-db-id").value = safeText(worker._id);
+  el("worker-id").value = safeText(worker.workerId);
+  el("worker-name").value = safeText(worker.name);
+  el("worker-position").value = safeText(worker.position);
+  el("worker-hours").value = formatHours(worker.hours);
+}
+
+async function loadWorkers() {
+  const payload = await apiRequest("/api/workers");
+  state.workers = Array.isArray(payload.workers) ? payload.workers : [];
+  renderWorkersDropdown();
+}
+
+async function loadReportSelection() {
+  const payload = await apiRequest(`/api/reports/${getReportDate()}`);
+  state.selectedWorkerIds = Array.isArray(payload.workerIds) ? payload.workerIds : [];
+}
+
+async function saveReportSelection(workerIds, options = {}) {
+  const payload = await apiRequest(`/api/reports/${getReportDate()}`, {
+    method: "PUT",
+    body: { workerIds }
+  });
+  state.selectedWorkerIds = Array.isArray(payload.workerIds) ? payload.workerIds : [];
+  if (!options.silent) {
+    setStatus("Report list updated.");
+  }
+}
+
+async function loadAdminUsers() {
+  if (state.currentUser?.role !== "admin") {
+    state.adminUsers = [];
+    renderAdminUsers();
     return;
   }
+  const payload = await apiRequest("/api/admin/users");
+  state.adminUsers = Array.isArray(payload.users) ? payload.users : [];
+  renderAdminUsers();
+}
+
+async function refreshAppData(options = {}) {
+  const { silent = false } = options;
+  if (!silent) setStatus("Loading data...");
+  await Promise.all([loadWorkers(), loadReportSelection(), loadAdminUsers()]);
+  renderSelectedTable();
+  renderLogo();
+  if (!silent) setStatus("Ready");
+}
+
+async function hydrateSession() {
+  if (!state.token) {
+    setCurrentUser(null);
+    return;
+  }
+
   try {
-    setStatus("Reading file...");
-    const text = await file.text();
-    const cleaned = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const lines = cleaned.split("\n").filter(l => l.trim());
-    if (!lines.length) {
-      setStatus("CSV empty", true);
-      e.target.value = null;
+    const payload = await apiRequest("/api/auth/me");
+    setCurrentUser(payload.user);
+    await refreshAppData({ silent: true });
+    setStatus("Ready");
+  } catch (error) {
+    persistToken("");
+    setCurrentUser(null);
+    setStatus("Login required.", true, "auth-status");
+  }
+}
+
+async function handleLogin(event) {
+  event.preventDefault();
+  setStatus("Checking credentials...", false, "auth-status");
+
+  try {
+    const payload = await apiRequest("/api/auth/login", {
+      method: "POST",
+      auth: false,
+      body: {
+        email: el("login-email").value.trim(),
+        password: el("login-password").value
+      }
+    });
+
+    persistToken(payload.token);
+    setCurrentUser(payload.user);
+    await refreshAppData({ silent: true });
+    event.target.reset();
+    setStatus("Logged in successfully.", false, "auth-status");
+    setStatus("Ready");
+  } catch (error) {
+    setStatus(error.message, true, "auth-status");
+  }
+}
+
+async function handleSignup(event) {
+  event.preventDefault();
+  setStatus("Creating account...", false, "auth-status");
+
+  try {
+    const payload = await apiRequest("/api/auth/signup", {
+      method: "POST",
+      auth: false,
+      body: {
+        name: el("signup-name").value.trim(),
+        email: el("signup-email").value.trim(),
+        password: el("signup-password").value
+      }
+    });
+
+    persistToken(payload.token);
+    setCurrentUser(payload.user);
+    await refreshAppData({ silent: true });
+    event.target.reset();
+    setStatus("Account created and logged in.", false, "auth-status");
+    setStatus("Ready");
+  } catch (error) {
+    setStatus(error.message, true, "auth-status");
+  }
+}
+
+async function handleChangePassword(event) {
+  event.preventDefault();
+
+  const oldPassword = el("modal-old-password").value;
+  const newPassword = el("modal-new-password").value;
+  const confirmPassword = el("modal-confirm-password").value;
+  const isSelf = state.passwordDialog.mode === "self";
+
+  if (newPassword.length < 6) {
+    setStatus("New password must be at least 6 characters long.", true);
+    return;
+  }
+
+  if (newPassword !== confirmPassword) {
+    setStatus("New password and confirm password do not match.", true);
+    return;
+  }
+
+  try {
+    if (isSelf) {
+      if (!oldPassword) {
+        setStatus("Enter your current password first.", true);
+        return;
+      }
+
+      await apiRequest("/api/auth/change-password", {
+        method: "POST",
+        body: { oldPassword, newPassword }
+      });
+      closePasswordModal();
+      setStatus("Password changed successfully.");
       return;
     }
-    function detectDelimiter(sampleLines) {
-      const candidates = [",", ";", "\t"];
-      const scores = { ",": 0, ";": 0, "\t": 0 };
-      const sampleCount = Math.min(sampleLines.length, 5);
-      for (let i = 0; i < sampleCount; i++) {
-        const ln = sampleLines[i];
-        let inQ = false;
-        for (let j = 0; j < ln.length; j++) {
-          const ch = ln[j];
-          if (ch === '"') {
-            inQ = !inQ;
-            continue;
-          }
-          if (!inQ && scores.hasOwnProperty(ch)) scores[ch]++;
-        }
-      }
-      let best = candidates[0];
-      for (const c of candidates) if (scores[c] > scores[best]) best = c;
-      return best;
-    }
-    const delim = detectDelimiter(lines.slice(0, Math.min(lines.length, 10)));
-    function parseCsvLine(line, d) {
-      const fields = [];
-      let cur = "";
-      let inQuotes = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') {
-          if (inQuotes && line[i + 1] === '"') {
-            cur += '"';
-            i++;
-            continue;
-          }
-          inQuotes = !inQuotes;
-          continue;
-        }
-        if (!inQuotes && ch === d) {
-          fields.push(cur);
-          cur = "";
-          continue;
-        }
-        cur += ch;
-      }
-      fields.push(cur);
-      return fields.map(f => f.replace(/^"|"$/g, "").trim());
-    }
-    const header = lines.shift();
-    const headers = parseCsvLine(header, delim).map(h => h.toLowerCase().trim());
-    const idx = {
-      id: headers.indexOf("id") !== -1 ? headers.indexOf("id") : 0,
-      name: headers.indexOf("name") !== -1 ? headers.indexOf("name") : 1,
-      position: headers.indexOf("position") !== -1 ? headers.indexOf("position") : 2,
-      hours: headers.indexOf("hours") !== -1 ? headers.indexOf("hours") : 3
-    };
-    const workers = await loadWorkers();
-    let added = 0, updated = 0, skipped = 0;
-    for (const l of lines) {
-      if (!l.trim()) continue;
-      const cols = parseCsvLine(l, delim);
-      const rec = {
-        id: safeText(cols[idx.id]),
-        name: safeText(cols[idx.name]),
-        position: safeText(cols[idx.position]),
-        hours: safeText(cols[idx.hours])
-      };
-      if (!rec.id || !rec.name) {
-        skipped++;
-        continue;
-      }
-      const ex = workers.findIndex(w => w.id === rec.id);
-      if (ex >= 0) {
-        workers[ex] = rec;
-        updated++;
-      } else {
-        workers.push(rec);
-        added++;
-      }
-    }
-    await saveWorkers(workers);
-    setStatus(`CSV imported — added:${added} updated:${updated} skipped:${skipped}`);
-    e.target.value = null;
-  } catch (err) {
-    console.error("CSV import error", err);
-    setStatus("CSV import failed: " + (err && err.message ? err.message : err), true);
-    if (e?.target) e.target.value = null;
+
+    await apiRequest(`/api/admin/users/${state.passwordDialog.userId}/reset-password`, {
+      method: "POST",
+      body: { password: newPassword }
+    });
+    closePasswordModal();
+    setStatus("User password reset successfully.");
+  } catch (error) {
+    setStatus(error.message, true);
   }
 }
 
-async function downloadJSON() {
-  const workers = await loadWorkers();
-  const blob = new Blob([JSON.stringify(workers, null, 2)], { type: "application/json" });
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "workers.json";
-  a.click();
-  setStatus("JSON backup downloaded");
+function handleLogout() {
+  closePasswordModal();
+  persistToken("");
+  state.workers = [];
+  state.selectedWorkerIds = [];
+  state.adminUsers = [];
+  clearWorkerForm();
+  setCurrentUser(null);
+  renderSelectedTable();
+  renderAdminUsers();
+  showAuthPanel("login");
+  setStatus("Logged out.", false, "auth-status");
+}
+
+async function addOrUpdateWorker() {
+  const workerDbId = safeText(el("worker-db-id").value).trim();
+  const payload = {
+    workerId: el("worker-id").value.trim(),
+    name: el("worker-name").value.trim(),
+    position: el("worker-position").value.trim(),
+    hours: normalizeHours(el("worker-hours").value)
+  };
+
+  if (!payload.workerId || !payload.name) {
+    setStatus("Worker ID and full name are required.", true);
+    return;
+  }
+
+  try {
+    if (workerDbId) {
+      await apiRequest(`/api/workers/${workerDbId}`, {
+        method: "PUT",
+        body: payload
+      });
+      setStatus("Worker updated.");
+    } else {
+      await apiRequest("/api/workers", {
+        method: "POST",
+        body: payload
+      });
+      setStatus("Worker added.");
+    }
+
+    clearWorkerForm();
+    await refreshAppData({ silent: true });
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+async function deleteWorker() {
+  const workerDbId = safeText(el("worker-db-id").value).trim();
+  const workerCode = el("worker-id").value.trim();
+  const worker = workerDbId
+    ? state.workers.find((item) => item._id === workerDbId)
+    : state.workers.find((item) => item.workerId === workerCode);
+
+  if (!worker) {
+    setStatus("Enter or load a worker before deleting.", true);
+    return;
+  }
+
+  try {
+    await apiRequest(`/api/workers/${worker._id}`, { method: "DELETE" });
+    clearWorkerForm();
+    await refreshAppData({ silent: true });
+    setStatus("Worker deleted.");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+async function addToSelected() {
+  const workerId = el("workers-dropdown").value;
+  if (!workerId) {
+    setStatus("Select a worker to add.", true);
+    return;
+  }
+
+  if (!state.selectedWorkerIds.includes(workerId)) {
+    state.selectedWorkerIds.push(workerId);
+    await saveReportSelection(state.selectedWorkerIds, { silent: true });
+  }
+
+  renderSelectedTable();
+  setStatus("Worker added to report list.");
+}
+
+async function clearSelected() {
+  state.selectedWorkerIds = [];
+  await saveReportSelection([], { silent: true });
+  renderSelectedTable();
+  setStatus("Report list cleared.");
+}
+
+async function addAllWorkersToSelected() {
+  if (!state.workers.length) {
+    setStatus("No workers available to add.", true);
+    return;
+  }
+
+  const merged = new Set(state.selectedWorkerIds);
+  state.workers.forEach((worker) => merged.add(worker._id));
+  state.selectedWorkerIds = Array.from(merged);
+  await saveReportSelection(state.selectedWorkerIds, { silent: true });
+  renderSelectedTable();
+  setStatus("All workers added to the report list.");
+}
+
+async function updateBulkHours(mode) {
+  const onlySelected = el("bulk-only-selected").checked;
+  const selectedIds = onlySelected ? [...state.selectedWorkerIds] : [];
+
+  if (onlySelected && !selectedIds.length) {
+    setStatus("Select at least one worker for bulk edit.", true);
+    return;
+  }
+
+  const rawValue = el("bulk-hours-input").value;
+  if (mode === "set" && rawValue === "") {
+    setStatus("Enter hours to apply.", true);
+    return;
+  }
+
+  try {
+    await apiRequest("/api/workers/bulk-hours", {
+      method: "POST",
+      body: {
+        mode,
+        value: Number(rawValue || 0),
+        workerIds: selectedIds
+      }
+    });
+    await refreshAppData({ silent: true });
+    setStatus(mode === "increment" ? "Added +1 hour." : "Bulk hours applied.");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function exportCSV() {
+  if (!state.workers.length) {
+    setStatus("No workers available for CSV export.", true);
+    return;
+  }
+
+  const header = ["workerId", "name", "position", "hours"].join(",");
+  const rows = state.workers.map((worker) => {
+    return [worker.workerId, worker.name, worker.position, formatHours(worker.hours)]
+      .map((value) => `"${safeText(value).replace(/"/g, '""')}"`)
+      .join(",");
+  });
+
+  const csv = [header, ...rows].join("\n");
+  downloadBlob(new Blob([csv], { type: "text/csv" }), "workers.csv");
+  setStatus("CSV exported.");
+}
+
+function detectDelimiter(lines) {
+  const candidates = [",", ";", "\t"];
+  const scores = { ",": 0, ";": 0, "\t": 0 };
+  const sampleLines = lines.slice(0, Math.min(lines.length, 5));
+
+  sampleLines.forEach((line) => {
+    let inQuotes = false;
+    for (const char of line) {
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (!inQuotes && Object.prototype.hasOwnProperty.call(scores, char)) {
+        scores[char] += 1;
+      }
+    }
+  });
+
+  return candidates.sort((left, right) => scores[right] - scores[left])[0];
+}
+
+function parseCsvLine(line, delimiter) {
+  const fields = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"') {
+      if (inQuotes && line[index + 1] === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (!inQuotes && char === delimiter) {
+      fields.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+
+  fields.push(current);
+  return fields.map((field) => field.trim());
+}
+
+async function importCSV(event) {
+  const file = event.target.files?.[0];
+  if (!file) {
+    return;
+  }
+
+  try {
+    setStatus("Reading CSV...");
+    const rawText = await file.text();
+    const cleaned = rawText.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const lines = cleaned.split("\n").filter((line) => line.trim());
+
+    if (!lines.length) {
+      throw new Error("CSV file is empty.");
+    }
+
+    const delimiter = detectDelimiter(lines);
+    const headerColumns = parseCsvLine(lines.shift(), delimiter).map((item) => item.toLowerCase());
+    const indexes = {
+      workerId: headerColumns.indexOf("workerid") >= 0 ? headerColumns.indexOf("workerid") : headerColumns.indexOf("id"),
+      name: headerColumns.indexOf("name"),
+      position: headerColumns.indexOf("position"),
+      hours: headerColumns.indexOf("hours")
+    };
+
+    const workers = lines.map((line) => {
+      const columns = parseCsvLine(line, delimiter);
+      return {
+        workerId: safeText(columns[indexes.workerId >= 0 ? indexes.workerId : 0]).trim(),
+        name: safeText(columns[indexes.name >= 0 ? indexes.name : 1]).trim(),
+        position: safeText(columns[indexes.position >= 0 ? indexes.position : 2]).trim(),
+        hours: normalizeHours(safeText(columns[indexes.hours >= 0 ? indexes.hours : 3]).trim())
+      };
+    });
+
+    const payload = await apiRequest("/api/workers/import", {
+      method: "POST",
+      body: { workers }
+    });
+
+    event.target.value = "";
+    await refreshAppData({ silent: true });
+    setStatus(
+      `CSV imported. Added: ${payload.summary.added}, updated: ${payload.summary.updated}, skipped: ${payload.summary.skipped}.`
+    );
+  } catch (error) {
+    event.target.value = "";
+    setStatus(error.message, true);
+  }
+}
+
+function downloadJSON() {
+  const content = JSON.stringify(state.workers, null, 2);
+  downloadBlob(new Blob([content], { type: "application/json" }), "workers.json");
+  setStatus("JSON backup downloaded.");
 }
 
 async function handleLogoUpload(file) {
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    await saveLogoDataUrl(reader.result);
-    await renderLogo();
-    setStatus("Logo uploaded");
-  };
-  reader.readAsDataURL(file);
+
+  try {
+    const reader = new FileReader();
+    const dataUrl = await new Promise((resolve, reject) => {
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("Logo upload failed."));
+      reader.readAsDataURL(file);
+    });
+
+    const payload = await apiRequest("/api/profile/logo", {
+      method: "PUT",
+      body: { logoDataUrl: dataUrl }
+    });
+
+    setCurrentUser(payload.user);
+    setStatus("Logo uploaded.");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
 }
 
-async function renderLogo() {
-  const area = document.getElementById("logo-area");
-  if (!area) return;
-  area.innerHTML = "";
-  const data = await loadLogo();
-  if (!data) return;
-  const img = document.createElement("img");
-  img.src = data;
-  img.style.maxHeight = "60px";
-  img.style.objectFit = "contain";
-  area.appendChild(img);
+async function clearLogo() {
+  try {
+    const payload = await apiRequest("/api/profile/logo", { method: "DELETE" });
+    setCurrentUser(payload.user);
+    setStatus("Default logo restored.");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+async function getFittedImage(source, box) {
+  if (!source) return null;
+
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => {
+      const sourceWidth = image.naturalWidth || image.width;
+      const sourceHeight = image.naturalHeight || image.height;
+      const ratio = Math.min(box.width / sourceWidth, box.height / sourceHeight, 1);
+      const width = sourceWidth * ratio;
+      const height = sourceHeight * ratio;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(sourceWidth));
+      canvas.height = Math.max(1, Math.round(sourceHeight));
+      const context = canvas.getContext("2d");
+      context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+
+      resolve({
+        dataUrl: canvas.toDataURL("image/png"),
+        format: "PNG",
+        x: box.x + (box.width - width) / 2,
+        y: box.y + (box.height - height) / 2,
+        width,
+        height
+      });
+    };
+    image.onerror = () => resolve(null);
+    image.src = source;
+  });
+}
+
+function fitCanvasText(ctx, text, maxWidth) {
+  const value = safeText(text);
+  if (ctx.measureText(value).width <= maxWidth) {
+    return value;
+  }
+
+  let trimmed = value;
+  while (trimmed.length > 0 && ctx.measureText(`${trimmed}...`).width > maxWidth) {
+    trimmed = trimmed.slice(0, -1);
+  }
+  return `${trimmed}...`;
+}
+
+function buildExportHeaderLayout(canvasWidth, margins, logoSpec) {
+  const logoBottom = logoSpec ? logoSpec.y + logoSpec.height : margins.top;
+  const titleY = logoBottom + 28;
+  const dateY = titleY + 24;
+  const lineY = dateY + 14;
+  return {
+    titleY,
+    dateY,
+    lineY,
+    tableStartY: lineY + 14
+  };
+}
+
+function drawPdfHeader(doc, options) {
+  const { pageWidth, dateText, title, logoSpec, margins, layout } = options;
+
+  if (logoSpec) {
+    doc.addImage(logoSpec.dataUrl, logoSpec.format, logoSpec.x, logoSpec.y, logoSpec.width, logoSpec.height);
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.setTextColor(0, 0, 0);
+  doc.text(title, pageWidth / 2, layout.titleY, { align: "center" });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(`Date: ${dateText}`, pageWidth - margins.right, layout.dateY, { align: "right" });
+
+  doc.setDrawColor(0, 0, 0);
+  doc.setLineWidth(0.8);
+  doc.line(margins.left, layout.lineY, pageWidth - margins.right, layout.lineY);
 }
 
 async function exportPDF() {
-  const selected = await loadSelected();
-  if (!selected || !selected.length) {
-    setStatus("No selected rows to export", true);
+  const selected = getSelectedWorkers();
+  if (!selected.length) {
+    setStatus("No selected workers to export.", true);
     return;
   }
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
   const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 40;
-  let cursorY = 30;
-  const logoData = await loadLogo();
-  if (logoData) {
-    try {
-      const img = new Image();
-      img.src = logoData;
-      await new Promise(res => {
-        img.onload = res;
-        img.onerror = res;
-      });
-      const maxW = 300;
-      const maxH = 80;
-      let w = img.width, h = img.height;
-      const ratio = Math.min(maxW / w, maxH / h, 1);
-      w = w * ratio;
-      h = h * ratio;
-      const x = (pageWidth - w) / 2;
-      doc.addImage(logoData, "PNG", x, cursorY, w, h);
-      cursorY += h + 40;
-    } catch (e) { }
-  }
-  doc.setFontSize(18);
-  doc.setFont("helvetica", "bold");
-  doc.text(document.getElementById("export-title").textContent || "Workers Overtime Sheet - Mechanical Yard", margin, cursorY + 8);
-  const rawDate = document.getElementById("export-date-input").value;
-  const ddmm = ddmmyyyyFromISO(rawDate);
-  doc.setFontSize(14);
-  doc.setFont("helvetica", "normal");
-  doc.text(`Date: ${ddmm}`, pageWidth - margin - doc.getTextWidth(`Date: ${ddmm}`), cursorY + 8);
-  cursorY += 30;
-  const body = selected.map(r => [r.id, r.name, r.hours || "", r.position || ""]);
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margins = { left: 32, right: 32, top: 0, bottom: 36 };
+  const title = el("export-title").textContent || "Workers Overtime Sheet";
+  const dateText = ddmmyyyyFromISO(getReportDate());
+  const logoSpec = await getFittedImage(currentLogoSource(), { x: 48, y: 18, width: pageWidth - 96, height: 84 });
+  const headerLayout = buildExportHeaderLayout(pageWidth, margins, logoSpec);
+  margins.top = headerLayout.tableStartY;
+  const body = selected.map((worker, index) => [
+    String(index + 1),
+    safeText(worker.workerId),
+    safeText(worker.name),
+    formatHours(worker.hours),
+    safeText(worker.position)
+  ]);
+
   doc.autoTable({
-    startY: cursorY,
-    head: [["PID", "Name", "Hours", "Position"]],
+    startY: margins.top,
+    margin: margins,
+    head: [["#", "PID", "Name", "Hours", "Position"]],
     body,
-    theme: "plain",
-    styles: { fontSize: 11, cellPadding: 8, textColor: 20, overflow: "linebreak", valign: "middle" },
-    headStyles: { fillColor: [14, 165, 164], textColor: 255, fontStyle: "bold" },
-    alternateRowStyles: { fillColor: [245, 250, 250] },
-    columnStyles: { 1: { fontStyle: "bold" } },
-    tableLineColor: [220, 220, 225],
-    tableLineWidth: 0.4,
-    margin: { left: margin, right: margin},
-    didDrawPage: function (data) {
-      const pageCount = doc.internal.getNumberOfPages();
-      doc.setFontSize(9);
-      doc.setTextColor(110);
-      doc.text(`Generated on ${ddmm}`, margin, doc.internal.pageSize.getHeight() - 30);
-      const pageStr = `Page ${doc.internal.getCurrentPageInfo().pageNumber} of ${pageCount}`;
-      doc.text(pageStr, pageWidth - margin - doc.getTextWidth(pageStr), doc.internal.pageSize.getHeight() - 30);
+    theme: "grid",
+    styles: {
+      fontSize: 9,
+      overflow: "ellipsize",
+      cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
+      minCellHeight: 21,
+      valign: "middle",
+      textColor: [0, 0, 0],
+      fillColor: [255, 255, 255],
+      lineColor: [0, 0, 0],
+      lineWidth: 0.5
+    },
+    headStyles: {
+      fillColor: [255, 255, 255],
+      textColor: [0, 0, 0],
+      fontStyle: "bold"
+    },
+    columnStyles: {
+      0: { cellWidth: 26, halign: "center" },
+      1: { cellWidth: 70 },
+      2: { cellWidth: 185 },
+      3: { cellWidth: 55, halign: "center" },
+      4: { cellWidth: 195 }
+    },
+    didDrawPage: () => {
+      drawPdfHeader(doc, { pageWidth, dateText, title, logoSpec, margins, layout: headerLayout });
     }
   });
-  const filename = `workers-${ddmm}.pdf`;
+
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setFontSize(9);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Generated on ${dateText}`, margins.left, pageHeight - 20);
+    doc.text(`Page ${page} of ${pageCount}`, pageWidth - margins.right, pageHeight - 20, { align: "right" });
+  }
+
+  const filename = `workers-${dateText}.pdf`;
   doc.save(filename);
-  setStatus(`PDF exported as ${filename}`);
+  setStatus(`PDF exported as ${filename}.`);
 }
 
 async function exportImage() {
-  const selected = await loadSelected();
-  if (!selected || !selected.length) { setStatus("No selected rows to export (image)", true); return; }
+  const selected = getSelectedWorkers();
+  if (!selected.length) {
+    setStatus("No selected workers to export.", true);
+    return;
+  }
 
-  const baseCanvasWidth = 794;
-  const margin = 40;
-  const rowHeight = 44;
-  const headerGap = 40;
   const scale = 2;
-
-  const col1 = 120;
-  const col2 = 320;
-  const col3 = 90;
-  const col4 = 160;
-
-  let tableWidth = col1 + col2 + col3 + col4;
-  let canvasWidth = Math.max(baseCanvasWidth, tableWidth + margin * 2);
-  const contentWidth = canvasWidth - margin * 2;
-
-  const neededHeight = margin * 2 + 180 + selected.length * rowHeight + 100;
-  const canvasHeight = Math.max(1400, neededHeight);
-
+  const margin = 32;
+  const rowHeight = 30;
+  const footerHeight = 42;
+  const columns = [36, 92, 272, 70, 178];
+  const tableWidth = columns.reduce((total, value) => total + value, 0);
+  const canvasWidth = margin * 2 + tableWidth;
+  const logoSpec = await getFittedImage(currentLogoSource(), { x: margin, y: 18, width: canvasWidth - margin * 2, height: 84 });
+  const headerLayout = buildExportHeaderLayout(canvasWidth, { left: margin, right: margin, top: 18 }, logoSpec);
+  const canvasHeight = headerLayout.tableStartY + footerHeight + rowHeight * (selected.length + 1) + 30;
   const canvas = document.createElement("canvas");
-  canvas.width = Math.round(canvasWidth * scale);
-  canvas.height = Math.round(canvasHeight * scale);
+  canvas.width = canvasWidth * scale;
+  canvas.height = canvasHeight * scale;
+
   const ctx = canvas.getContext("2d");
   ctx.scale(scale, scale);
-
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-  let y = margin;
+  const dateText = ddmmyyyyFromISO(getReportDate());
+  const title = el("export-title").textContent || "Workers Overtime Sheet";
 
-  const logoData = await loadLogo();
-  if (logoData) {
-    await new Promise(res => {
-      const img = new Image();
-      img.onload = () => {
-        const maxW = Math.min(420, contentWidth);
-        const ratio = Math.min(maxW / img.width, 120 / img.height, 1);
-        const w = img.width * ratio;
-        const h = img.height * ratio;
-        const x = (canvasWidth - w) / 2;
-        ctx.drawImage(img, x, y, w, h);
-        y += h + 36;
-        res();
-      };
-      img.onerror = () => { y += 36; res(); };
-      img.src = logoData;
+  if (logoSpec) {
+    const logoImage = await new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => resolve(null);
+      image.src = logoSpec.dataUrl;
     });
-  } else {
-    y += 30;
+    if (logoImage) {
+      ctx.drawImage(logoImage, logoSpec.x, logoSpec.y, logoSpec.width, logoSpec.height);
+    }
   }
 
-  const headerFontSize = canvasWidth > 1000 ? 32 : 28;
-  const rowFontSize = canvasWidth > 1000 ? 18 : 16;
+  ctx.fillStyle = "#000000";
+  ctx.font = "700 16px Inter, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText(title, canvasWidth / 2, headerLayout.titleY);
 
-  ctx.fillStyle = "#111827";
-  ctx.font = `bold ${headerFontSize}px Inter, Arial`;
-  const title = document.getElementById("export-title")?.textContent || "Worker Report";
-  const titleW = ctx.measureText(title).width;
-  ctx.fillText(title, (canvasWidth - titleW) / 2, y + headerFontSize - 6);
+  ctx.fillStyle = "#000000";
+  ctx.font = "400 10px Inter, sans-serif";
+  ctx.textAlign = "right";
+  ctx.fillText(`Date: ${dateText}`, canvasWidth - margin, headerLayout.dateY);
 
-  y += headerGap;
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(margin, headerLayout.lineY);
+  ctx.lineTo(canvasWidth - margin, headerLayout.lineY);
+  ctx.stroke();
 
-  const rawDate = document.getElementById("export-date-input")?.value || new Date().toISOString().split("T")[0];
-  const dateText = ddmmyyyyFromISO(rawDate);
-
-  ctx.font = `${rowFontSize}px Inter, Arial`;
-  const dateW = ctx.measureText(`Date: ${dateText}`).width;
-  ctx.fillText(`Date: ${dateText}`, canvasWidth - margin - dateW, y - headerGap + 18);
-
-  const tableX = margin;
-  const tableY = y;
-
-  ctx.fillStyle = "rgb(14,165,164)";
-  ctx.fillRect(tableX, tableY, tableWidth, rowHeight);
+  const startX = margin;
+  let cursorY = headerLayout.tableStartY;
 
   ctx.fillStyle = "#ffffff";
-  ctx.font = `600 ${rowFontSize + 2}px Inter, Arial`;
+  ctx.fillRect(startX, cursorY, tableWidth, rowHeight);
+  ctx.fillStyle = "#000000";
+  ctx.font = "600 12px Inter, sans-serif";
+  ctx.textAlign = "left";
 
-  let cx = tableX;
-  ctx.fillText("PID", cx + 12, tableY + rowHeight - 12); cx += col1;
-  ctx.fillText("Name", cx + 12, tableY + rowHeight - 12); cx += col2;
-  ctx.fillText("Hours", cx + 12, tableY + rowHeight - 12); cx += col3;
-  ctx.fillText("Position", cx + 12, tableY + rowHeight - 12);
+  const labels = ["#", "PID", "Name", "Hours", "Position"];
+  let offsetX = startX;
+  labels.forEach((label, index) => {
+    ctx.fillText(label, offsetX + 10, cursorY + 19);
+    offsetX += columns[index];
+  });
 
-  y = tableY + rowHeight;
-  ctx.font = `${rowFontSize}px Inter, Arial`;
+  cursorY += rowHeight;
+  ctx.font = "400 11px Inter, sans-serif";
 
-  for (let i = 0; i < selected.length; i++) {
-    const r = selected[i];
+  selected.forEach((worker, index) => {
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(startX, cursorY, tableWidth, rowHeight);
+    ctx.fillStyle = "#000000";
+    const values = [
+      String(index + 1),
+      safeText(worker.workerId),
+      safeText(worker.name),
+      formatHours(worker.hours),
+      safeText(worker.position)
+    ];
 
-    if (i % 2 === 1) {
-      ctx.fillStyle = "rgba(245,250,250,1)";
-      ctx.fillRect(tableX, y, tableWidth, rowHeight);
+    let valueX = startX;
+    values.forEach((value, columnIndex) => {
+      const maxWidth = columns[columnIndex] - 18;
+      const fitted = fitCanvasText(ctx, value, maxWidth);
+      ctx.fillText(fitted, valueX + 10, cursorY + 19);
+      valueX += columns[columnIndex];
+    });
+
+    cursorY += rowHeight;
+  });
+
+  ctx.strokeStyle = "#000000";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(startX, headerLayout.tableStartY, tableWidth, rowHeight * (selected.length + 1));
+
+  let gridX = startX;
+  ctx.beginPath();
+  columns.forEach((columnWidth) => {
+    ctx.moveTo(gridX, headerLayout.tableStartY);
+    ctx.lineTo(gridX, headerLayout.tableStartY + rowHeight * (selected.length + 1));
+    gridX += columnWidth;
+  });
+  ctx.moveTo(gridX, headerLayout.tableStartY);
+  ctx.lineTo(gridX, headerLayout.tableStartY + rowHeight * (selected.length + 1));
+
+  for (let lineIndex = 1; lineIndex <= selected.length + 1; lineIndex += 1) {
+    const y = headerLayout.tableStartY + rowHeight * lineIndex;
+    ctx.moveTo(startX, y);
+    ctx.lineTo(startX + tableWidth, y);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = "#000000";
+  ctx.font = "400 10px Inter, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(`Generated on ${dateText}`, margin, canvasHeight - 18);
+
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      setStatus("Image export failed.", true);
+      return;
     }
+    downloadBlob(blob, `workers-${dateText}.png`);
+    setStatus("Image exported.");
+  }, "image/png");
+}
 
-    ctx.fillStyle = "#111827";
-
-    let colX = tableX;
-    ctx.fillText(String(r.id || ""), colX + 12, y + rowHeight - 12); colX += col1;
-
-    drawTextWithin(ctx, String(r.name || ""), colX + 12, y + 8, col2 - 24, rowHeight, rowFontSize);
-    colX += col2;
-
-    ctx.fillText(String(r.hours || ""), colX + 12, y + rowHeight - 12); colX += col3;
-
-    drawTextWithin(ctx, String(r.position || ""), colX + 12, y + 8, col4 - 24, rowHeight, rowFontSize);
-
-    y += rowHeight;
+async function clearAllData() {
+  if (!window.confirm("Clear all workers, report selections, and your uploaded logo?")) {
+    return;
   }
 
-  ctx.strokeStyle = "#cccccc";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(tableX, tableY, tableWidth, (selected.length + 1) * rowHeight);
-
-  const footerY = Math.max(y + 24, canvasHeight / scale - margin);
-  ctx.fillStyle = "#6b7280";
-  ctx.font = `${rowFontSize - 1}px Inter, Arial`;
-  ctx.fillText(`Generated on ${dateText}`, margin, footerY);
-
-  canvas.toBlob(blob => {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = `workers-${dateText}.png`;
-    a.click();
-    setStatus("Image exported");
-  }, "image/png", 1.0);
-
-  function drawTextWithin(ctx, text, x, y, maxWidth, lineHeight, fontSize) {
-    ctx.font = `${fontSize}px Inter, Arial`;
-    const words = (text || "").split(/\s+/);
-    let line = "";
-    let curY = y + fontSize;
-
-    for (let n = 0; n < words.length; n++) {
-      const test = line + words[n] + " ";
-      if (ctx.measureText(test).width > maxWidth && n > 0) {
-        ctx.fillText(line.trim(), x, curY);
-        line = words[n] + " ";
-        curY += lineHeight;
-      } else {
-        line = test;
-      }
+  try {
+    await apiRequest("/api/account/data", { method: "DELETE" });
+    state.workers = [];
+    state.selectedWorkerIds = [];
+    if (state.currentUser) {
+      state.currentUser.logoDataUrl = "";
+      renderLogo();
     }
-
-    if (line) ctx.fillText(line.trim(), x, curY);
+    clearWorkerForm();
+    renderWorkersDropdown();
+    renderSelectedTable();
+    setStatus("All account data cleared.");
+  } catch (error) {
+    setStatus(error.message, true);
   }
 }
 
-async function clearAll() {
-  if (!confirm("Clear all data?")) return;
-  await localforage.clear();
-  await populateDropdown();
-  await saveSelected([]);
-  await renderLogo();
-  setStatus("Cleared all data");
+async function handleAdminCreateUser(event) {
+  event.preventDefault();
+
+  try {
+    await apiRequest("/api/admin/users", {
+      method: "POST",
+      body: {
+        name: el("admin-user-name").value.trim(),
+        email: el("admin-user-email").value.trim(),
+        password: el("admin-user-password").value
+      }
+    });
+    event.target.reset();
+    await loadAdminUsers();
+    setStatus("User created.");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+function bindStaticEvents() {
+  el("show-login").addEventListener("click", () => showAuthPanel("login"));
+  el("show-signup").addEventListener("click", () => showAuthPanel("signup"));
+  el("login-form").addEventListener("submit", handleLogin);
+  el("signup-form").addEventListener("submit", handleSignup);
+  el("open-change-password").addEventListener("click", () => {
+    openPasswordModal({
+      mode: "self",
+      userId: state.currentUser?.id || "",
+      userName: state.currentUser?.name || ""
+    });
+  });
+  el("password-modal-form").addEventListener("submit", handleChangePassword);
+  el("close-password-modal").addEventListener("click", closePasswordModal);
+  el("password-modal-cancel").addEventListener("click", closePasswordModal);
+  el("password-modal").addEventListener("click", (event) => {
+    if (event.target.hasAttribute("data-close-password-modal")) {
+      closePasswordModal();
+    }
+  });
+  el("logout-btn").addEventListener("click", handleLogout);
+
+  el("add-worker").addEventListener("click", addOrUpdateWorker);
+  el("delete-worker").addEventListener("click", deleteWorker);
+  el("clear-form").addEventListener("click", clearWorkerForm);
+  el("add-selected").addEventListener("click", addToSelected);
+  el("clear-list").addEventListener("click", clearSelected);
+  el("add-all-workers").addEventListener("click", addAllWorkersToSelected);
+  el("apply-bulk-hours").addEventListener("click", () => updateBulkHours("set"));
+  el("increment-bulk-hours").addEventListener("click", () => updateBulkHours("increment"));
+  el("export-csv").addEventListener("click", exportCSV);
+  el("import-csv").addEventListener("change", importCSV);
+  el("download-json").addEventListener("click", downloadJSON);
+  el("clear-storage").addEventListener("click", clearAllData);
+  el("export-pdf").addEventListener("click", exportPDF);
+  el("export-image").addEventListener("click", exportImage);
+  el("clear-logo").addEventListener("click", clearLogo);
+  el("logo-input").addEventListener("change", (event) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      handleLogoUpload(file);
+    }
+    event.target.value = "";
+  });
+  el("selected-search").addEventListener("input", (event) => {
+    state.currentFilter = event.target.value.trim();
+    renderSelectedTable();
+  });
+  el("selected-refresh").addEventListener("click", async () => {
+    await refreshAppData({ silent: true });
+    setStatus("Data refreshed.");
+  });
+  el("export-date-input").addEventListener("change", async () => {
+    updateDateDisplay();
+    await loadReportSelection();
+    renderSelectedTable();
+    setStatus("Loaded selected workers for the chosen date.");
+  });
+  el("admin-create-user-form").addEventListener("submit", handleAdminCreateUser);
+
+  document.querySelectorAll("#selected-table thead th[data-sort-key]").forEach((header) => {
+    header.addEventListener("click", () => {
+      const key = header.getAttribute("data-sort-key");
+      if (state.currentSort.key === key) {
+        state.currentSort.dir *= -1;
+      } else {
+        state.currentSort.key = key;
+        state.currentSort.dir = 1;
+      }
+      renderSelectedTable();
+    });
+  });
 }
 
 async function init() {
-  try {
-    await populateDropdown();
-    await renderSelectedTable();
-    await renderLogo();
-    const dateInput = document.getElementById("export-date-input");
-    const now = new Date();
-    dateInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    const display = document.getElementById("export-date-display");
-    if (display) display.textContent = ddmmyyyyFromISO(dateInput.value);
-    dateInput.addEventListener("input", () => {
-      if (display) display.textContent = ddmmyyyyFromISO(dateInput.value);
-    });
-    document.getElementById("add-worker").onclick = addOrUpdateWorker;
-    document.getElementById("delete-worker").onclick = deleteWorker;
-    document.getElementById("clear-form").onclick = clearForm;
-    document.getElementById("add-selected").onclick = addToSelected;
-    document.getElementById("clear-list").onclick = clearSelected;
-    const addAllBtn = document.getElementById("add-all-workers");
-    if (addAllBtn) addAllBtn.onclick = addAllWorkersToSelected;
-    document.getElementById("export-csv").onclick = exportCSV;
-    document.getElementById("import-csv").onchange = importCSV;
-    document.getElementById("download-json").onclick = downloadJSON;
-    document.getElementById("clear-storage").onclick = clearAll;
-    document.getElementById("export-pdf").onclick = exportPDF;
-    document.getElementById("export-image").onclick = exportImage;
-    document.getElementById("apply-bulk-hours").onclick = applyBulkHours;
-    document.getElementById("increment-bulk-hours").onclick = incrementBulkHours;
-    document.getElementById("logo-input").onchange = e => {
-      if (e.target.files && e.target.files[0]) handleLogoUpload(e.target.files[0]);
-    };
-    document.getElementById("clear-logo").onclick = async () => {
-      await saveLogoDataUrl(null);
-      await renderLogo();
-      setStatus("Logo cleared");
-    };
-    window.addEventListener("resize", () => {
-      applyResponsiveActionStyle();
-    });
-    applyResponsiveActionStyle();
-    setStatus("Ready");
-  } catch (err) {
-    console.error("init error", err);
-    setStatus("Initialization failed: " + (err && err.message), true);
-  }
+  el("export-date-input").value = todayIso();
+  updateDateDisplay();
+  renderSelectedTable();
+  bindStaticEvents();
+  showAuthPanel("login");
+  await hydrateSession();
 }
 
 init();
