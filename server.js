@@ -8,6 +8,9 @@ const jwt = require("jsonwebtoken");
 const { DEFAULT_REPORT_DATE, SEEDED_WORKERS } = require("./seed-data/default-workers");
 
 const app = express();
+const publicDir = path.join(__dirname, "public");
+const isVercel = process.env.VERCEL === "1";
+let initializationPromise = null;
 
 const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "change-this-before-production";
@@ -137,6 +140,28 @@ function validateRequiredConfiguration() {
   if (ADMIN_PASSWORD.length < 6) {
     throw new Error("Set ADMIN_PASSWORD in .env to a private password with at least 6 characters.");
   }
+}
+
+async function initializeApp() {
+  if (initializationPromise) {
+    return initializationPromise;
+  }
+
+  initializationPromise = (async () => {
+    validateRequiredConfiguration();
+
+    if (mongoose.connection.readyState !== 1) {
+      await mongoose.connect(MONGODB_URI);
+    }
+
+    const adminUser = await ensureDefaultAdmin();
+    await seedAdminWorkers(adminUser);
+  })().catch((error) => {
+    initializationPromise = null;
+    throw error;
+  });
+
+  return initializationPromise;
 }
 
 async function ensureDefaultAdmin() {
@@ -545,10 +570,19 @@ app.post("/api/admin/users/:id/reset-password", authMiddleware, adminOnly, async
   }
 });
 
-app.use(express.static(__dirname));
+app.use(express.static(publicDir));
+
+app.use(async (req, res, next) => {
+  try {
+    await initializeApp();
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
 
 app.get("*", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
+  res.sendFile(path.join(publicDir, "index.html"));
 });
 
 app.use((error, req, res, next) => {
@@ -560,16 +594,17 @@ app.use((error, req, res, next) => {
 });
 
 async function start() {
-  validateRequiredConfiguration();
-  await mongoose.connect(MONGODB_URI);
-  const adminUser = await ensureDefaultAdmin();
-  await seedAdminWorkers(adminUser);
+  await initializeApp();
   app.listen(PORT, () => {
     console.log(`Worker Manager running on http://localhost:${PORT}`);
   });
 }
 
-start().catch((error) => {
-  console.error("Failed to start Worker Manager:", error.message);
-  process.exit(1);
-});
+if (!isVercel) {
+  start().catch((error) => {
+    console.error("Failed to start Worker Manager:", error.message);
+    process.exit(1);
+  });
+}
+
+module.exports = app;
