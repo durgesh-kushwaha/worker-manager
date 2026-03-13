@@ -5,7 +5,7 @@ const express = require("express");
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { DEFAULT_REPORT_DATE, SEEDED_WORKERS } = require("./seed-data/default-workers");
+const { DEFAULT_REPORT_DATE, PERMANENT_WORKER, SEEDED_WORKERS } = require("./seed-data/default-workers");
 
 const app = express();
 const publicDir = path.join(__dirname, "public");
@@ -47,7 +47,8 @@ const workerSchema = new mongoose.Schema(
     workerId: { type: String, required: true, trim: true, maxlength: 80 },
     name: { type: String, required: true, trim: true, maxlength: 160 },
     position: { type: String, trim: true, maxlength: 160, default: "" },
-    hours: { type: Number, default: 0, min: 0 }
+    hours: { type: Number, default: 0, min: 0 },
+    isPermanent: { type: Boolean, default: false, index: true }
   },
   { timestamps: true }
 );
@@ -112,6 +113,39 @@ function isIsoDate(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(String(value || ""));
 }
 
+function isPermanentWorkerId(workerId) {
+  return String(workerId || "").trim() === PERMANENT_WORKER.workerId;
+}
+
+function uniqueStrings(values = []) {
+  const seen = new Set();
+  const items = [];
+
+  values.forEach((value) => {
+    const nextValue = String(value || "").trim();
+    if (!nextValue || seen.has(nextValue)) {
+      return;
+    }
+    seen.add(nextValue);
+    items.push(nextValue);
+  });
+
+  return items;
+}
+
+function sameStringArray(left = [], right = []) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return left.every((value, index) => value === right[index]);
+}
+
+function orderWorkerIdsWithPermanentFirst(permanentWorkerId, workerIds = []) {
+  const orderedIds = uniqueStrings(workerIds);
+  return [permanentWorkerId, ...orderedIds.filter((workerId) => workerId !== permanentWorkerId)];
+}
+
 async function authMiddleware(req, res, next) {
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : "";
@@ -164,6 +198,7 @@ async function initializeApp() {
 
     const adminUser = await ensureDefaultAdmin();
     await seedAdminWorkers(adminUser);
+    await ensurePermanentWorkersForAllUsers();
   })().catch((error) => {
     initializationPromise = null;
     throw error;
@@ -212,7 +247,8 @@ async function seedAdminWorkers(adminUser) {
       workerId: worker.workerId,
       name: worker.name,
       position: worker.position,
-      hours: worker.hours
+      hours: worker.hours,
+      isPermanent: worker.workerId === PERMANENT_WORKER.workerId
     }))
   );
 
@@ -233,9 +269,118 @@ async function seedAdminWorkers(adminUser) {
   }
 }
 
+async function ensurePermanentWorkerForOwner(ownerId) {
+  let worker = await Worker.findOne({ owner: ownerId, workerId: PERMANENT_WORKER.workerId });
+
+  if (!worker) {
+    worker = await Worker.create({
+      owner: ownerId,
+      workerId: PERMANENT_WORKER.workerId,
+      name: PERMANENT_WORKER.name,
+      position: PERMANENT_WORKER.position,
+      hours: PERMANENT_WORKER.hours,
+      isPermanent: true
+    });
+    return worker;
+  }
+
+  let dirty = false;
+  if (worker.name !== PERMANENT_WORKER.name) {
+    worker.name = PERMANENT_WORKER.name;
+    dirty = true;
+  }
+  if (worker.position !== PERMANENT_WORKER.position) {
+    worker.position = PERMANENT_WORKER.position;
+    dirty = true;
+  }
+  if (!worker.isPermanent) {
+    worker.isPermanent = true;
+    dirty = true;
+  }
+
+  const nextHours = normalizeHours(worker.hours);
+  if (Number(worker.hours) !== nextHours) {
+    worker.hours = nextHours;
+    dirty = true;
+  }
+
+  if (dirty) {
+    await worker.save();
+  }
+
+  return worker;
+}
+
+async function ensurePermanentWorkersForAllUsers() {
+  const users = await User.find().select("_id").lean();
+  await Promise.all(users.map((user) => ensurePermanentWorkerForOwner(user._id)));
+}
+
+async function normalizeReportWorkerIds(ownerId, workerIds = []) {
+  const permanentWorker = await ensurePermanentWorkerForOwner(ownerId);
+  const permanentWorkerId = String(permanentWorker._id);
+  const requestedIds = uniqueStrings(workerIds).filter(isObjectId);
+
+  if (!requestedIds.length) {
+    return [permanentWorkerId];
+  }
+
+  const ownedWorkers = await Worker.find({ owner: ownerId, _id: { $in: requestedIds } }).select("_id").lean();
+  const ownedWorkerIds = new Set(ownedWorkers.map((worker) => String(worker._id)));
+  const filteredIds = requestedIds.filter((workerId) => ownedWorkerIds.has(workerId));
+
+  return orderWorkerIdsWithPermanentFirst(permanentWorkerId, filteredIds);
+}
+
 async function loadReportSelection(ownerId, reportDate) {
   const report = await Report.findOne({ owner: ownerId, reportDate }).lean();
-  return Array.isArray(report?.workerIds) ? report.workerIds.map(String) : [];
+  const currentIds = Array.isArray(report?.workerIds) ? report.workerIds.map(String) : [];
+  const workerIds = await normalizeReportWorkerIds(ownerId, currentIds);
+
+  if (!report || !sameStringArray(currentIds, workerIds)) {
+    await Report.findOneAndUpdate(
+      { owner: ownerId, reportDate },
+      { owner: ownerId, reportDate, workerIds },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  }
+
+  return workerIds;
+}
+
+async function upsertWorkerForOwner(ownerId, rawPayload) {
+  const payload = normalizeWorkerPayload(rawPayload);
+  if (!payload.workerId || !payload.name) {
+    throw new Error("Worker ID and name are required.");
+  }
+
+  const existing = await Worker.findOne({ owner: ownerId, workerId: payload.workerId });
+  if (!existing) {
+    if (isPermanentWorkerId(payload.workerId)) {
+      const permanentWorker = await ensurePermanentWorkerForOwner(ownerId);
+      permanentWorker.hours = payload.hours;
+      await permanentWorker.save();
+      return { worker: permanentWorker, action: "updated" };
+    }
+
+    const worker = await Worker.create({ owner: ownerId, ...payload, isPermanent: false });
+    return { worker, action: "added" };
+  }
+
+  if (existing.isPermanent || isPermanentWorkerId(existing.workerId)) {
+    existing.workerId = PERMANENT_WORKER.workerId;
+    existing.name = PERMANENT_WORKER.name;
+    existing.position = PERMANENT_WORKER.position;
+    existing.hours = payload.hours;
+    existing.isPermanent = true;
+  } else {
+    existing.name = payload.name;
+    existing.position = payload.position;
+    existing.hours = payload.hours;
+  }
+
+  await existing.save();
+  return { worker: existing, action: "updated" };
 }
 
 app.post("/api/auth/signup", async (req, res, next) => {
@@ -255,6 +400,7 @@ app.post("/api/auth/signup", async (req, res, next) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await User.create({ name, email, passwordHash, role: "user" });
+    await ensurePermanentWorkerForOwner(user._id);
     const token = createToken(user);
 
     return res.status(201).json({ token, user: sanitizeUser(user) });
@@ -334,21 +480,26 @@ app.delete("/api/profile/logo", authMiddleware, async (req, res, next) => {
 
 app.get("/api/workers", authMiddleware, async (req, res, next) => {
   try {
-    const workers = await Worker.find({ owner: req.user._id }).sort({ workerId: 1, name: 1 }).lean();
+    await ensurePermanentWorkerForOwner(req.user._id);
+    const workers = await Worker.find({ owner: req.user._id }).sort({ isPermanent: -1, name: 1, workerId: 1 }).lean();
     return res.json({ workers });
   } catch (error) {
     return next(error);
   }
 });
 
-app.post("/api/workers", authMiddleware, async (req, res, next) => {
+app.post("/api/workers", authMiddleware, adminOnly, async (req, res, next) => {
   try {
     const payload = normalizeWorkerPayload(req.body);
     if (!payload.workerId || !payload.name) {
       return res.status(400).json({ message: "Worker ID and name are required." });
     }
 
-    const worker = await Worker.create({ owner: req.user._id, ...payload });
+    if (isPermanentWorkerId(payload.workerId)) {
+      return res.status(400).json({ message: "The permanent worker already exists. Use modify mode to update hours only." });
+    }
+
+    const worker = await Worker.create({ owner: req.user._id, ...payload, isPermanent: false });
     return res.status(201).json({ worker });
   } catch (error) {
     if (error?.code === 11000) {
@@ -358,7 +509,7 @@ app.post("/api/workers", authMiddleware, async (req, res, next) => {
   }
 });
 
-app.put("/api/workers/:id", authMiddleware, async (req, res, next) => {
+app.put("/api/workers/:id", authMiddleware, adminOnly, async (req, res, next) => {
   try {
     if (!isObjectId(req.params.id)) {
       return res.status(400).json({ message: "Invalid worker reference." });
@@ -369,15 +520,26 @@ app.put("/api/workers/:id", authMiddleware, async (req, res, next) => {
       return res.status(400).json({ message: "Worker ID and name are required." });
     }
 
-    const worker = await Worker.findOneAndUpdate(
-      { _id: req.params.id, owner: req.user._id },
-      payload,
-      { new: true, runValidators: true }
-    );
-
+    const worker = await Worker.findOne({ _id: req.params.id, owner: req.user._id });
     if (!worker) {
       return res.status(404).json({ message: "Worker not found." });
     }
+
+    if (worker.isPermanent) {
+      worker.workerId = PERMANENT_WORKER.workerId;
+      worker.name = PERMANENT_WORKER.name;
+      worker.position = PERMANENT_WORKER.position;
+      worker.hours = payload.hours;
+      worker.isPermanent = true;
+      await worker.save();
+      return res.json({ worker });
+    }
+
+    worker.workerId = payload.workerId;
+    worker.name = payload.name;
+    worker.position = payload.position;
+    worker.hours = payload.hours;
+    await worker.save();
 
     return res.json({ worker });
   } catch (error) {
@@ -388,16 +550,22 @@ app.put("/api/workers/:id", authMiddleware, async (req, res, next) => {
   }
 });
 
-app.delete("/api/workers/:id", authMiddleware, async (req, res, next) => {
+app.delete("/api/workers/:id", authMiddleware, adminOnly, async (req, res, next) => {
   try {
     if (!isObjectId(req.params.id)) {
       return res.status(400).json({ message: "Invalid worker reference." });
     }
 
-    const worker = await Worker.findOneAndDelete({ _id: req.params.id, owner: req.user._id });
+    const worker = await Worker.findOne({ _id: req.params.id, owner: req.user._id });
     if (!worker) {
       return res.status(404).json({ message: "Worker not found." });
     }
+
+    if (worker.isPermanent) {
+      return res.status(403).json({ message: "The permanent worker cannot be deleted." });
+    }
+
+    await Worker.deleteOne({ _id: worker._id });
 
     await Report.updateMany({ owner: req.user._id }, { $pull: { workerIds: worker._id } });
     return res.json({ message: "Worker deleted." });
@@ -406,7 +574,7 @@ app.delete("/api/workers/:id", authMiddleware, async (req, res, next) => {
   }
 });
 
-app.post("/api/workers/import", authMiddleware, async (req, res, next) => {
+app.post("/api/workers/import", authMiddleware, adminOnly, async (req, res, next) => {
   try {
     const incoming = Array.isArray(req.body.workers) ? req.body.workers : [];
     const summary = { added: 0, updated: 0, skipped: 0 };
@@ -418,17 +586,8 @@ app.post("/api/workers/import", authMiddleware, async (req, res, next) => {
         continue;
       }
 
-      const existing = await Worker.findOne({ owner: req.user._id, workerId: payload.workerId });
-      if (existing) {
-        existing.name = payload.name;
-        existing.position = payload.position;
-        existing.hours = payload.hours;
-        await existing.save();
-        summary.updated += 1;
-      } else {
-        await Worker.create({ owner: req.user._id, ...payload });
-        summary.added += 1;
-      }
+      const { action } = await upsertWorkerForOwner(req.user._id, payload);
+      summary[action] += 1;
     }
 
     return res.json({ summary });
@@ -437,7 +596,7 @@ app.post("/api/workers/import", authMiddleware, async (req, res, next) => {
   }
 });
 
-app.post("/api/workers/bulk-hours", authMiddleware, async (req, res, next) => {
+app.post("/api/workers/bulk-hours", authMiddleware, adminOnly, async (req, res, next) => {
   try {
     const mode = String(req.body.mode || "");
     const value = normalizeHours(req.body.value);
@@ -491,9 +650,7 @@ app.put("/api/reports/:date", authMiddleware, async (req, res, next) => {
       return res.status(400).json({ message: "Invalid report date." });
     }
 
-    const requestedIds = Array.isArray(req.body.workerIds) ? req.body.workerIds.filter(isObjectId) : [];
-    const ownedWorkers = await Worker.find({ owner: req.user._id, _id: { $in: requestedIds } }).select("_id").lean();
-    const workerIds = ownedWorkers.map((worker) => worker._id);
+    const workerIds = await normalizeReportWorkerIds(req.user._id, Array.isArray(req.body.workerIds) ? req.body.workerIds : []);
 
     const report = await Report.findOneAndUpdate(
       { owner: req.user._id, reportDate },
@@ -507,13 +664,14 @@ app.put("/api/reports/:date", authMiddleware, async (req, res, next) => {
   }
 });
 
-app.delete("/api/account/data", authMiddleware, async (req, res, next) => {
+app.delete("/api/account/data", authMiddleware, adminOnly, async (req, res, next) => {
   try {
-    await Worker.deleteMany({ owner: req.user._id });
+    const permanentWorker = await ensurePermanentWorkerForOwner(req.user._id);
+    await Worker.deleteMany({ owner: req.user._id, _id: { $ne: permanentWorker._id } });
     await Report.deleteMany({ owner: req.user._id });
     req.user.logoDataUrl = "";
     await req.user.save();
-    return res.json({ message: "All account data cleared." });
+    return res.json({ message: "Account data cleared. The permanent worker was kept." });
   } catch (error) {
     return next(error);
   }
@@ -546,6 +704,7 @@ app.post("/api/admin/users", authMiddleware, adminOnly, async (req, res, next) =
     const passwordHash = await bcrypt.hash(password, 12);
     const role = email === ADMIN_EMAIL ? "admin" : "user";
     const user = await User.create({ name, email, passwordHash, role });
+    await ensurePermanentWorkerForOwner(user._id);
 
     return res.status(201).json({ user: sanitizeUser(user) });
   } catch (error) {
@@ -574,6 +733,36 @@ app.post("/api/admin/users/:id/reset-password", authMiddleware, adminOnly, async
 
     return res.json({ message: `Password reset for ${user.email}.` });
   } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/api/admin/workers/assign", authMiddleware, adminOnly, async (req, res, next) => {
+  try {
+    const requestedOwnerIds = uniqueStrings(Array.isArray(req.body.ownerIds) ? req.body.ownerIds : []).filter(isObjectId);
+    if (!requestedOwnerIds.length) {
+      return res.status(400).json({ message: "Select at least one user." });
+    }
+
+    const payload = normalizeWorkerPayload(req.body.worker);
+    if (!payload.workerId || !payload.name) {
+      return res.status(400).json({ message: "Worker ID and name are required." });
+    }
+
+    const users = await User.find({ _id: { $in: requestedOwnerIds } }).select("_id").lean();
+    const ownerIds = users.map((user) => String(user._id));
+    const summary = { added: 0, updated: 0, skipped: requestedOwnerIds.length - ownerIds.length };
+
+    for (const ownerId of ownerIds) {
+      const { action } = await upsertWorkerForOwner(ownerId, payload);
+      summary[action] += 1;
+    }
+
+    return res.json({ summary });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ message: "Worker ID already exists for one of the selected users." });
+    }
     return next(error);
   }
 });

@@ -1,7 +1,14 @@
 const DEFAULT_REPORT_DATE = "2026-03-05";
 
+const PERMANENT_WORKER = {
+  workerId: "9551",
+  name: "Kanhaiya",
+  position: "Fabricator",
+  hours: 2
+};
+
 const SEEDED_WORKERS = [
-  { workerId: "9551", name: "KANHAIYA", position: "Fabricator", hours: 2 },
+  PERMANENT_WORKER,
   { workerId: "12357", name: "Dinesh", position: "Welder", hours: 2 },
   { workerId: "7378", name: "Om prakash", position: "Fitter", hours: 2 },
   { workerId: "11852", name: "Satnam Singh", position: "Helper", hours: 2 },
@@ -27,5 +34,6 @@ const SEEDED_WORKERS = [
 
 module.exports = {
   DEFAULT_REPORT_DATE,
+  PERMANENT_WORKER,
   SEEDED_WORKERS
 };

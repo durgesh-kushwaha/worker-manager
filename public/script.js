@@ -8,6 +8,7 @@ const state = {
   selectedWorkerIds: [],
   adminUsers: [],
   passwordDialog: { mode: "", userId: "", userName: "" },
+  workerDialog: { mode: "add", workerId: "" },
   currentFilter: "",
   currentSort: { key: null, dir: 1 }
 };
@@ -84,6 +85,30 @@ function setStatus(message = "", isError = false, targetId = "status") {
   target.classList.toggle("is-error", Boolean(isError));
 }
 
+function isAdminUser() {
+  return state.currentUser?.role === "admin";
+}
+
+function syncBodyModalState() {
+  const anyOpen = ["password-modal", "worker-modal"].some((modalId) => {
+    const modal = el(modalId);
+    return modal && !modal.classList.contains("hidden");
+  });
+  document.body.classList.toggle("modal-open", anyOpen);
+}
+
+function getWorkerById(workerId) {
+  return state.workers.find((worker) => worker._id === workerId) || null;
+}
+
+function pinPermanentWorkerFirst(workers = []) {
+  const permanentWorker = workers.find((worker) => worker.isPermanent);
+  if (!permanentWorker) {
+    return workers;
+  }
+  return [permanentWorker, ...workers.filter((worker) => worker._id !== permanentWorker._id)];
+}
+
 function clearPasswordModalFields() {
   el("password-modal-form").reset();
 }
@@ -93,7 +118,7 @@ function closePasswordModal() {
   clearPasswordModalFields();
   el("password-modal").classList.add("hidden");
   el("password-modal").setAttribute("aria-hidden", "true");
-  document.body.classList.remove("modal-open");
+  syncBodyModalState();
 }
 
 function openPasswordModal({ mode, userId = "", userName = "" }) {
@@ -110,13 +135,106 @@ function openPasswordModal({ mode, userId = "", userName = "" }) {
   el("password-modal-submit").textContent = isSelf ? "Update Password" : "Reset Password";
   el("password-modal").classList.remove("hidden");
   el("password-modal").setAttribute("aria-hidden", "false");
-  document.body.classList.add("modal-open");
+  syncBodyModalState();
 
   if (isSelf) {
     el("modal-old-password").focus();
   } else {
     el("modal-new-password").focus();
   }
+}
+
+function clearWorkerForm() {
+  el("worker-db-id").value = "";
+  el("worker-id").value = "";
+  el("worker-name").value = "";
+  el("worker-position").value = "";
+  el("worker-hours").value = "";
+}
+
+function updateWorkerFormInteractivity() {
+  const selectedWorker = getWorkerById(safeText(el("worker-db-id").value).trim());
+  const isLockedPermanent = Boolean(selectedWorker?.isPermanent && state.workerDialog.mode === "modify");
+
+  el("worker-id").disabled = isLockedPermanent;
+  el("worker-name").disabled = isLockedPermanent;
+  el("worker-position").disabled = isLockedPermanent;
+  el("delete-worker").classList.toggle("hidden", state.workerDialog.mode !== "modify" || isLockedPermanent || !selectedWorker);
+  el("add-worker").textContent = state.workerDialog.mode === "modify" ? "Update Worker" : "Add Worker";
+  el("worker-modal-help").textContent = isLockedPermanent
+    ? "Kanhaiya is the permanent default worker. Only hours can be changed and he cannot be deleted."
+    : state.workerDialog.mode === "modify"
+      ? "Modify the selected worker record. Changes are saved everywhere for this user."
+      : "Add a new worker record to the database.";
+}
+
+function fillWorkerForm(worker) {
+  if (!worker) {
+    clearWorkerForm();
+    updateWorkerFormInteractivity();
+    return;
+  }
+
+  state.workerDialog.workerId = safeText(worker._id);
+  el("worker-db-id").value = safeText(worker._id);
+  el("worker-id").value = safeText(worker.workerId);
+  el("worker-name").value = safeText(worker.name);
+  el("worker-position").value = safeText(worker.position);
+  el("worker-hours").value = formatHours(worker.hours);
+  el("worker-modal-select").value = safeText(worker._id);
+  updateWorkerFormInteractivity();
+}
+
+function setWorkerDialogMode(mode, workerId = "") {
+  state.workerDialog.mode = mode === "modify" ? "modify" : "add";
+  el("worker-mode-add").classList.toggle("active", state.workerDialog.mode === "add");
+  el("worker-mode-modify").classList.toggle("active", state.workerDialog.mode === "modify");
+  el("worker-modify-picker").classList.toggle("hidden", state.workerDialog.mode !== "modify");
+  el("worker-modal-title").textContent = state.workerDialog.mode === "modify" ? "Modify Worker" : "Add Worker";
+  el("worker-modal-copy").textContent = state.workerDialog.mode === "modify"
+    ? "Pick a worker, then update the record from this popup."
+    : "Create a new worker without showing the full form on the page.";
+
+  if (state.workerDialog.mode === "add") {
+    state.workerDialog.workerId = "";
+    el("worker-modal-select").value = "";
+    clearWorkerForm();
+    updateWorkerFormInteractivity();
+    el("worker-id").focus();
+    return;
+  }
+
+  const nextWorker = getWorkerById(workerId) || getWorkerById(state.workerDialog.workerId) || state.workers[0] || null;
+  if (nextWorker) {
+    fillWorkerForm(nextWorker);
+    el("worker-modal-select").value = safeText(nextWorker._id);
+    el("worker-hours").focus();
+  } else {
+    clearWorkerForm();
+    el("worker-modal-select").value = "";
+    updateWorkerFormInteractivity();
+  }
+}
+
+function closeWorkerModal() {
+  state.workerDialog = { mode: "add", workerId: "" };
+  clearWorkerForm();
+  el("worker-modal").classList.add("hidden");
+  el("worker-modal").setAttribute("aria-hidden", "true");
+  syncBodyModalState();
+}
+
+function openWorkerModal(options = {}) {
+  if (!isAdminUser()) {
+    setStatus("Only admins can change worker records.", true);
+    return;
+  }
+
+  const { mode = "add", workerId = "" } = options;
+  el("worker-modal").classList.remove("hidden");
+  el("worker-modal").setAttribute("aria-hidden", "false");
+  syncBodyModalState();
+  setWorkerDialogMode(mode, workerId);
 }
 
 function persistToken(token) {
@@ -137,17 +255,23 @@ function setCurrentUser(user) {
 
   if (!state.currentUser) {
     closePasswordModal();
+    closeWorkerModal();
     el("admin-panel").classList.add("hidden");
     return;
   }
 
+  const isAdmin = isAdminUser();
   el("nav-user-name").textContent = state.currentUser.name;
   el("nav-user-email").textContent = state.currentUser.email;
   el("nav-user-role").textContent = state.currentUser.role;
   el("account-name").textContent = state.currentUser.name;
   el("account-email").textContent = state.currentUser.email;
-  el("nav-user-role").classList.toggle("role-admin", state.currentUser.role === "admin");
-  el("admin-panel").classList.toggle("hidden", state.currentUser.role !== "admin");
+  el("nav-user-role").classList.toggle("role-admin", isAdmin);
+  el("admin-panel").classList.toggle("hidden", !isAdmin);
+  el("worker-management-section").classList.toggle("hidden", !isAdmin);
+  el("bulk-hours-section").classList.toggle("hidden", !isAdmin);
+  el("csv-import-wrap").classList.toggle("hidden", !isAdmin);
+  el("clear-storage").classList.toggle("hidden", !isAdmin);
   renderLogo();
 }
 
@@ -231,15 +355,44 @@ function renderWorkersDropdown() {
   state.workers.forEach((worker) => {
     const option = document.createElement("option");
     option.value = worker._id;
-    option.textContent = `${worker.name} (${worker.workerId})`;
+    option.textContent = worker.isPermanent ? `${worker.name} (${worker.workerId}) - Default` : `${worker.name} (${worker.workerId})`;
     dropdown.appendChild(option);
   });
+
+  renderWorkerModalPicker();
+}
+
+function renderWorkerModalPicker() {
+  const picker = el("worker-modal-select");
+  if (!picker) return;
+
+  const currentValue = state.workerDialog.workerId;
+  picker.innerHTML = '<option value="">-- Select a worker to modify --</option>';
+
+  state.workers.forEach((worker) => {
+    const option = document.createElement("option");
+    option.value = worker._id;
+    option.textContent = worker.isPermanent ? `${worker.name} (${worker.workerId}) - Permanent` : `${worker.name} (${worker.workerId})`;
+    picker.appendChild(option);
+  });
+
+  if (currentValue && getWorkerById(currentValue)) {
+    picker.value = currentValue;
+    fillWorkerForm(getWorkerById(currentValue));
+    return;
+  }
+
+  if (state.workerDialog.mode === "modify" && state.workers.length) {
+    fillWorkerForm(state.workers[0]);
+  }
 }
 
 function getSelectedWorkers() {
-  return state.selectedWorkerIds
+  return pinPermanentWorkerFirst(
+    state.selectedWorkerIds
     .map((id) => state.workers.find((worker) => worker._id === id))
-    .filter(Boolean);
+    .filter(Boolean)
+  );
 }
 
 function renderSelectedTable() {
@@ -267,6 +420,8 @@ function renderSelectedTable() {
     });
   }
 
+  rows = pinPermanentWorkerFirst(rows);
+
   if (!rows.length) {
     tbody.innerHTML = '<tr class="empty-row"><td colspan="5" class="empty-state">No selected workers for this report date.</td></tr>';
     return;
@@ -274,17 +429,33 @@ function renderSelectedTable() {
 
   tbody.innerHTML = rows
     .map((worker) => {
+      const showManageButton = isAdminUser();
+      const showRemoveButton = !worker.isPermanent;
+      const actionContent = showManageButton || showRemoveButton
+        ? `
+            <div class="action-group">
+              ${
+                showManageButton
+                  ? `<button class="edit-btn" type="button" data-worker-id="${worker._id}">${worker.isPermanent ? "Edit Hours" : "Modify"}</button>`
+                  : ""
+              }
+              ${
+                showRemoveButton
+                  ? `<button class="remove-btn" type="button" data-remove-id="${worker._id}">Remove</button>`
+                  : `<span class="inline-note permanent-note">Default worker is pinned</span>`
+              }
+            </div>
+          `
+        : '<span class="inline-note permanent-note">Default worker is pinned</span>';
+
       return `
-        <tr>
-          <td data-label="PID">${escapeHtml(worker.workerId)}</td>
-          <td data-label="Name">${escapeHtml(worker.name)}</td>
+        <tr class="${worker.isPermanent ? "permanent-row" : ""}">
+          <td data-label="PID">${worker.isPermanent ? `<strong>${escapeHtml(worker.workerId)}</strong>` : escapeHtml(worker.workerId)}</td>
+          <td data-label="Name">${worker.isPermanent ? `<strong>${escapeHtml(worker.name)}</strong>` : escapeHtml(worker.name)}</td>
           <td data-label="Hours">${formatHours(worker.hours)}</td>
           <td data-label="Position">${escapeHtml(worker.position)}</td>
           <td data-label="Action">
-            <div class="action-group">
-              <button class="edit-btn" type="button" data-worker-id="${worker._id}">Edit</button>
-              <button class="remove-btn" type="button" data-remove-id="${worker._id}">Remove</button>
-            </div>
+            ${actionContent}
           </td>
         </tr>
       `;
@@ -309,8 +480,8 @@ function renderSelectedTable() {
         setStatus("Worker record not found.", true);
         return;
       }
-      fillWorkerForm(worker);
-      setStatus("Worker loaded into the form for editing.");
+      openWorkerModal({ mode: "modify", workerId: worker._id });
+      setStatus(worker.isPermanent ? "Permanent worker opened. Only hours can be changed." : "Worker opened for editing.");
     });
   });
 }
@@ -319,8 +490,9 @@ function renderAdminUsers() {
   const tbody = document.querySelector("#users-table tbody");
   if (!tbody) return;
 
-  if (!state.currentUser || state.currentUser.role !== "admin") {
+  if (!isAdminUser()) {
     tbody.innerHTML = "";
+    renderAdminWorkerTargets();
     return;
   }
 
@@ -354,22 +526,37 @@ function renderAdminUsers() {
       openPasswordModal({ mode: "admin", userId, userName });
     });
   });
+
+  renderAdminWorkerTargets();
 }
 
-function clearWorkerForm() {
-  el("worker-db-id").value = "";
-  el("worker-id").value = "";
-  el("worker-name").value = "";
-  el("worker-position").value = "";
-  el("worker-hours").value = "";
-}
+function renderAdminWorkerTargets() {
+  const container = el("admin-worker-user-list");
+  if (!container) return;
 
-function fillWorkerForm(worker) {
-  el("worker-db-id").value = safeText(worker._id);
-  el("worker-id").value = safeText(worker.workerId);
-  el("worker-name").value = safeText(worker.name);
-  el("worker-position").value = safeText(worker.position);
-  el("worker-hours").value = formatHours(worker.hours);
+  if (!isAdminUser()) {
+    container.innerHTML = "";
+    return;
+  }
+
+  if (!state.adminUsers.length) {
+    container.innerHTML = '<p class="inline-note">No users available yet.</p>';
+    return;
+  }
+
+  container.innerHTML = state.adminUsers
+    .map((user) => {
+      return `
+        <label class="admin-user-option">
+          <input type="checkbox" value="${user.id}" />
+          <span>
+            <strong>${escapeHtml(user.name)}</strong>
+            <small>${escapeHtml(user.email)} · ${escapeHtml(user.role)}</small>
+          </span>
+        </label>
+      `;
+    })
+    .join("");
 }
 
 async function loadWorkers() {
@@ -530,11 +717,11 @@ async function handleChangePassword(event) {
 
 function handleLogout() {
   closePasswordModal();
+  closeWorkerModal();
   persistToken("");
   state.workers = [];
   state.selectedWorkerIds = [];
   state.adminUsers = [];
-  clearWorkerForm();
   setCurrentUser(null);
   renderSelectedTable();
   renderAdminUsers();
@@ -543,6 +730,11 @@ function handleLogout() {
 }
 
 async function addOrUpdateWorker() {
+  if (!isAdminUser()) {
+    setStatus("Only admins can change worker records.", true);
+    return;
+  }
+
   const workerDbId = safeText(el("worker-db-id").value).trim();
   const payload = {
     workerId: el("worker-id").value.trim(),
@@ -573,12 +765,18 @@ async function addOrUpdateWorker() {
 
     clearWorkerForm();
     await refreshAppData({ silent: true });
+    closeWorkerModal();
   } catch (error) {
     setStatus(error.message, true);
   }
 }
 
 async function deleteWorker() {
+  if (!isAdminUser()) {
+    setStatus("Only admins can delete worker records.", true);
+    return;
+  }
+
   const workerDbId = safeText(el("worker-db-id").value).trim();
   const workerCode = el("worker-id").value.trim();
   const worker = workerDbId
@@ -594,6 +792,7 @@ async function deleteWorker() {
     await apiRequest(`/api/workers/${worker._id}`, { method: "DELETE" });
     clearWorkerForm();
     await refreshAppData({ silent: true });
+    closeWorkerModal();
     setStatus("Worker deleted.");
   } catch (error) {
     setStatus(error.message, true);
@@ -607,11 +806,13 @@ async function addToSelected() {
     return;
   }
 
-  if (!state.selectedWorkerIds.includes(workerId)) {
-    state.selectedWorkerIds.push(workerId);
-    await saveReportSelection(state.selectedWorkerIds, { silent: true });
+  if (state.selectedWorkerIds.includes(workerId)) {
+    setStatus("Worker is already in the report list.");
+    return;
   }
 
+  state.selectedWorkerIds.push(workerId);
+  await saveReportSelection(state.selectedWorkerIds, { silent: true });
   renderSelectedTable();
   setStatus("Worker added to report list.");
 }
@@ -620,7 +821,7 @@ async function clearSelected() {
   state.selectedWorkerIds = [];
   await saveReportSelection([], { silent: true });
   renderSelectedTable();
-  setStatus("Report list cleared.");
+  setStatus("Report list cleared. The default worker stayed pinned.");
 }
 
 async function addAllWorkersToSelected() {
@@ -638,6 +839,11 @@ async function addAllWorkersToSelected() {
 }
 
 async function updateBulkHours(mode) {
+  if (!isAdminUser()) {
+    setStatus("Only admins can change worker hours in bulk.", true);
+    return;
+  }
+
   const onlySelected = el("bulk-only-selected").checked;
   const selectedIds = onlySelected ? [...state.selectedWorkerIds] : [];
 
@@ -734,6 +940,12 @@ function parseCsvLine(line, delimiter) {
 }
 
 async function importCSV(event) {
+  if (!isAdminUser()) {
+    event.target.value = "";
+    setStatus("Only admins can import worker records.", true);
+    return;
+  }
+
   const file = event.target.files?.[0];
   if (!file) {
     return;
@@ -868,6 +1080,10 @@ function fitCanvasText(ctx, text, maxWidth) {
   return `${trimmed}...`;
 }
 
+function isPermanentExportCell(worker, columnIndex) {
+  return Boolean(worker?.isPermanent && (columnIndex === 1 || columnIndex === 2));
+}
+
 function buildExportHeaderLayout(canvasWidth, margins, logoSpec) {
   const logoBottom = logoSpec ? logoSpec.y + logoSpec.height : margins.top;
   const titleY = logoBottom + 28;
@@ -889,12 +1105,12 @@ function drawPdfHeader(doc, options) {
   }
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(15);
+  doc.setFontSize(17);
   doc.setTextColor(0, 0, 0);
   doc.text(title, pageWidth / 2, layout.titleY, { align: "center" });
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(10);
+  doc.setFontSize(11);
   doc.text(`Date: ${dateText}`, pageWidth - margins.right, layout.dateY, { align: "right" });
 
   doc.setDrawColor(0, 0, 0);
@@ -934,10 +1150,10 @@ async function exportPDF() {
     body,
     theme: "grid",
     styles: {
-      fontSize: 9,
+      fontSize: 10.5,
       overflow: "ellipsize",
-      cellPadding: { top: 4, right: 4, bottom: 4, left: 4 },
-      minCellHeight: 21,
+      cellPadding: { top: 5, right: 5, bottom: 5, left: 5 },
+      minCellHeight: 24,
       valign: "middle",
       textColor: [0, 0, 0],
       fillColor: [255, 255, 255],
@@ -947,14 +1163,25 @@ async function exportPDF() {
     headStyles: {
       fillColor: [255, 255, 255],
       textColor: [0, 0, 0],
-      fontStyle: "bold"
+      fontStyle: "bold",
+      fontSize: 10.5
     },
     columnStyles: {
-      0: { cellWidth: 26, halign: "center" },
-      1: { cellWidth: 70 },
-      2: { cellWidth: 185 },
-      3: { cellWidth: 55, halign: "center" },
-      4: { cellWidth: 195 }
+      0: { cellWidth: 30, halign: "center" },
+      1: { cellWidth: 78 },
+      2: { cellWidth: 176 },
+      3: { cellWidth: 60, halign: "center" },
+      4: { cellWidth: 187 }
+    },
+    didParseCell: (hook) => {
+      if (hook.section !== "body") {
+        return;
+      }
+
+      const worker = selected[hook.row.index];
+      if (isPermanentExportCell(worker, hook.column.index)) {
+        hook.cell.styles.fontStyle = "bold";
+      }
     },
     didDrawPage: () => {
       drawPdfHeader(doc, { pageWidth, dateText, title, logoSpec, margins, layout: headerLayout });
@@ -964,7 +1191,7 @@ async function exportPDF() {
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
     doc.setPage(page);
-    doc.setFontSize(9);
+    doc.setFontSize(10);
     doc.setTextColor(0, 0, 0);
     doc.text(`Generated on ${dateText}`, margins.left, pageHeight - 20);
     doc.text(`Page ${page} of ${pageCount}`, pageWidth - margins.right, pageHeight - 20, { align: "right" });
@@ -984,9 +1211,9 @@ async function exportImage() {
 
   const scale = 2;
   const margin = 32;
-  const rowHeight = 30;
+  const rowHeight = 36;
   const footerHeight = 42;
-  const columns = [36, 92, 272, 70, 178];
+  const columns = [36, 100, 248, 80, 184];
   const tableWidth = columns.reduce((total, value) => total + value, 0);
   const canvasWidth = margin * 2 + tableWidth;
   const logoSpec = await getFittedImage(currentLogoSource(), { x: margin, y: 18, width: canvasWidth - margin * 2, height: 84 });
@@ -1017,12 +1244,12 @@ async function exportImage() {
   }
 
   ctx.fillStyle = "#000000";
-  ctx.font = "700 16px Inter, sans-serif";
+  ctx.font = "700 18px Inter, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(title, canvasWidth / 2, headerLayout.titleY);
 
   ctx.fillStyle = "#000000";
-  ctx.font = "400 10px Inter, sans-serif";
+  ctx.font = "500 11px Inter, sans-serif";
   ctx.textAlign = "right";
   ctx.fillText(`Date: ${dateText}`, canvasWidth - margin, headerLayout.dateY);
 
@@ -1039,18 +1266,17 @@ async function exportImage() {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(startX, cursorY, tableWidth, rowHeight);
   ctx.fillStyle = "#000000";
-  ctx.font = "600 12px Inter, sans-serif";
+  ctx.font = "700 13px Inter, sans-serif";
   ctx.textAlign = "left";
 
   const labels = ["#", "PID", "Name", "Hours", "Position"];
   let offsetX = startX;
   labels.forEach((label, index) => {
-    ctx.fillText(label, offsetX + 10, cursorY + 19);
+    ctx.fillText(label, offsetX + 10, cursorY + 22);
     offsetX += columns[index];
   });
 
   cursorY += rowHeight;
-  ctx.font = "400 11px Inter, sans-serif";
 
   selected.forEach((worker, index) => {
     ctx.fillStyle = "#ffffff";
@@ -1066,9 +1292,10 @@ async function exportImage() {
 
     let valueX = startX;
     values.forEach((value, columnIndex) => {
+      ctx.font = isPermanentExportCell(worker, columnIndex) ? "700 12px Inter, sans-serif" : "500 12px Inter, sans-serif";
       const maxWidth = columns[columnIndex] - 18;
       const fitted = fitCanvasText(ctx, value, maxWidth);
-      ctx.fillText(fitted, valueX + 10, cursorY + 19);
+      ctx.fillText(fitted, valueX + 10, cursorY + 22);
       valueX += columns[columnIndex];
     });
 
@@ -1097,7 +1324,7 @@ async function exportImage() {
   ctx.stroke();
 
   ctx.fillStyle = "#000000";
-  ctx.font = "400 10px Inter, sans-serif";
+  ctx.font = "500 11px Inter, sans-serif";
   ctx.textAlign = "left";
   ctx.fillText(`Generated on ${dateText}`, margin, canvasHeight - 18);
 
@@ -1112,22 +1339,24 @@ async function exportImage() {
 }
 
 async function clearAllData() {
+  if (!isAdminUser()) {
+    setStatus("Only admins can clear worker database data.", true);
+    return;
+  }
+
   if (!window.confirm("Clear all workers, report selections, and your uploaded logo?")) {
     return;
   }
 
   try {
     await apiRequest("/api/account/data", { method: "DELETE" });
-    state.workers = [];
-    state.selectedWorkerIds = [];
     if (state.currentUser) {
       state.currentUser.logoDataUrl = "";
       renderLogo();
     }
-    clearWorkerForm();
-    renderWorkersDropdown();
-    renderSelectedTable();
-    setStatus("All account data cleared.");
+    await refreshAppData({ silent: true });
+    closeWorkerModal();
+    setStatus("Account data cleared. The permanent worker was kept.");
   } catch (error) {
     setStatus(error.message, true);
   }
@@ -1146,8 +1375,45 @@ async function handleAdminCreateUser(event) {
       }
     });
     event.target.reset();
-    await loadAdminUsers();
+    await refreshAppData({ silent: true });
     setStatus("User created.");
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
+async function handleAdminAssignWorker(event) {
+  event.preventDefault();
+
+  if (!isAdminUser()) {
+    setStatus("Only admins can assign workers to users.", true);
+    return;
+  }
+
+  const ownerIds = Array.from(document.querySelectorAll("#admin-worker-user-list input[type='checkbox']:checked"))
+    .map((input) => input.value)
+    .filter(Boolean);
+
+  try {
+    await apiRequest("/api/admin/workers/assign", {
+      method: "POST",
+      body: {
+        ownerIds,
+        worker: {
+          workerId: el("admin-assign-worker-id").value.trim(),
+          name: el("admin-assign-worker-name").value.trim(),
+          position: el("admin-assign-worker-position").value.trim(),
+          hours: normalizeHours(el("admin-assign-worker-hours").value)
+        }
+      }
+    });
+
+    event.target.reset();
+    document.querySelectorAll("#admin-worker-user-list input[type='checkbox']").forEach((input) => {
+      input.checked = false;
+    });
+    await refreshAppData({ silent: true });
+    setStatus("Worker assigned to selected users.");
   } catch (error) {
     setStatus(error.message, true);
   }
@@ -1175,9 +1441,27 @@ function bindStaticEvents() {
   });
   el("logout-btn").addEventListener("click", handleLogout);
 
+  el("open-worker-modal").addEventListener("click", () => openWorkerModal({ mode: "add" }));
+  el("close-worker-modal").addEventListener("click", closeWorkerModal);
+  el("worker-modal-cancel").addEventListener("click", closeWorkerModal);
+  el("worker-modal").addEventListener("click", (event) => {
+    if (event.target.hasAttribute("data-close-worker-modal")) {
+      closeWorkerModal();
+    }
+  });
+  el("worker-mode-add").addEventListener("click", () => setWorkerDialogMode("add"));
+  el("worker-mode-modify").addEventListener("click", () => setWorkerDialogMode("modify"));
+  el("worker-modal-select").addEventListener("change", (event) => {
+    const worker = getWorkerById(event.target.value);
+    if (!worker) {
+      clearWorkerForm();
+      updateWorkerFormInteractivity();
+      return;
+    }
+    fillWorkerForm(worker);
+  });
   el("add-worker").addEventListener("click", addOrUpdateWorker);
   el("delete-worker").addEventListener("click", deleteWorker);
-  el("clear-form").addEventListener("click", clearWorkerForm);
   el("add-selected").addEventListener("click", addToSelected);
   el("clear-list").addEventListener("click", clearSelected);
   el("add-all-workers").addEventListener("click", addAllWorkersToSelected);
@@ -1212,6 +1496,7 @@ function bindStaticEvents() {
     setStatus("Loaded selected workers for the chosen date.");
   });
   el("admin-create-user-form").addEventListener("submit", handleAdminCreateUser);
+  el("admin-assign-worker-form").addEventListener("submit", handleAdminAssignWorker);
 
   document.querySelectorAll("#selected-table thead th[data-sort-key]").forEach((header) => {
     header.addEventListener("click", () => {

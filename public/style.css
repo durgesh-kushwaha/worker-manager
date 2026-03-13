@@ -335,6 +335,13 @@ a {
   font-size: 1.05rem;
 }
 
+.section-copy {
+  margin: 0 0 0.85rem;
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
 .input-stack {
   display: grid;
   gap: 0.8rem;
@@ -598,6 +605,15 @@ a {
   background: #fbfdff;
 }
 
+.permanent-row {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.06), rgba(14, 165, 233, 0.03));
+}
+
+.permanent-note {
+  font-weight: 700;
+  color: var(--primary);
+}
+
 .data-table th[data-sort-key] {
   cursor: pointer;
 }
@@ -668,6 +684,11 @@ a {
   gap: 1rem;
 }
 
+.admin-form-stack {
+  display: grid;
+  gap: 1rem;
+}
+
 .admin-form {
   display: grid;
   gap: 0.8rem;
@@ -678,6 +699,39 @@ a {
 
 .admin-users {
   min-width: 0;
+}
+
+.admin-user-select-grid {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 220px;
+  overflow: auto;
+  padding: 0.2rem;
+}
+
+.admin-user-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  padding: 0.75rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.admin-user-option input {
+  margin-top: 0.15rem;
+}
+
+.admin-user-option span {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.admin-user-option small {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
 }
 
 .users-table {
@@ -764,6 +818,41 @@ a {
   justify-content: flex-end;
   gap: 0.75rem;
   margin-top: 0.35rem;
+}
+
+.worker-modal-card {
+  width: min(100%, 560px);
+}
+
+.worker-mode-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.mode-chip {
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 0.82rem 0.9rem;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.mode-chip.active {
+  background: var(--surface-strong);
+  border-color: var(--surface-strong);
+  color: #ffffff;
+}
+
+.worker-modal-form {
+  margin-top: 0.95rem;
+}
+
+.worker-modal-actions {
+  flex-wrap: wrap;
 }
 
 .app-footer {
@@ -915,13 +1004,16 @@ a {
     max-width: none;
   }
 
-  .table-tools,
-  .input-group,
   .password-reset-row {
     flex-direction: column;
   }
 
-  .export-buttons-group button,
+  .table-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, 150px);
+    align-items: stretch;
+  }
+
   .table-tools .btn-auto {
     width: 100%;
   }
@@ -998,8 +1090,16 @@ a {
     font-size: 0.82rem;
   }
 
+  .input-group,
   .export-buttons-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.55rem;
+  }
+
+  .input-group > *,
+  .export-buttons-group > * {
+    min-width: 0;
   }
 
   .password-reset-row {
@@ -1051,10 +1151,14 @@ a {
   #logout-btn,
   #open-change-password,
   #clear-logo,
-  #add-all-workers,
   #selected-refresh {
     width: fit-content;
     align-self: flex-start;
+  }
+
+  #add-all-workers,
+  #open-worker-modal {
+    width: 100%;
   }
 
   .sidebar,
@@ -1144,6 +1248,10 @@ a {
   .admin-panel-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .worker-modal-card {
+    width: min(100%, 100%);
   }
 
   #selected-table tbody {
@@ -1236,6 +1344,13 @@ a {
 
   .modal-actions .btn-auto {
     width: 100%;
+  }
+
+  .worker-mode-toggle,
+  .input-group,
+  .export-buttons-group,
+  .table-tools {
+    grid-template-columns: 1fr;
   }
 
   .btn,

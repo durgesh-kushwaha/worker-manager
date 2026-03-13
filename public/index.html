@@ -92,20 +92,10 @@
           <button id="clear-logo" class="btn btn-danger-500 mt-3" type="button">Reset to Default Logo</button>
         </div>
 
-        <div class="form-section">
-          <h2>Add / Update Worker</h2>
-          <div class="input-stack">
-            <input id="worker-db-id" type="hidden" />
-            <input id="worker-id" placeholder="Worker ID / PID" class="input-field" />
-            <input id="worker-name" placeholder="Full Name" class="input-field" />
-            <input id="worker-position" placeholder="Position" class="input-field" />
-            <input id="worker-hours" placeholder="Work Hours" type="number" min="0" step="0.5" class="input-field" />
-            <div class="input-group">
-              <button id="add-worker" class="btn btn-primary btn-flex" type="button">Save Worker</button>
-              <button id="delete-worker" class="btn btn-danger-600 btn-flex" type="button">Delete</button>
-            </div>
-            <button id="clear-form" class="btn btn-secondary" type="button">Clear</button>
-          </div>
+        <div id="worker-management-section" class="form-section hidden">
+          <h2>Worker Management</h2>
+          <p class="section-copy">Open one popup to add a worker or modify an existing worker.</p>
+          <button id="open-worker-modal" class="btn btn-primary" type="button">Add / Modify Worker</button>
         </div>
 
         <div class="form-section">
@@ -120,7 +110,7 @@
           <button id="add-all-workers" class="btn btn-indigo mt-3" type="button">Add All Workers to List</button>
         </div>
 
-        <div class="form-section">
+        <div id="bulk-hours-section" class="form-section hidden">
           <h2>Bulk Edit Hours</h2>
           <div class="input-stack">
             <input id="bulk-hours-input" type="number" min="0" step="0.5" placeholder="Set hours (e.g. 8)" class="input-field" />
@@ -139,7 +129,10 @@
           <h2>CSV Backup</h2>
           <div class="input-stack">
             <button id="export-csv" class="btn btn-indigo" type="button">Export CSV</button>
-            <input id="import-csv" type="file" accept=".csv,text/csv,text/plain,*/*" class="input-field file-input" />
+            <div id="csv-import-wrap" class="input-stack hidden">
+              <input id="import-csv" type="file" accept=".csv,text/csv,text/plain,*/*" class="input-field file-input" />
+              <p class="inline-note">Admin only: import or update worker records in the database.</p>
+            </div>
           </div>
         </div>
 
@@ -185,7 +178,7 @@
           <button id="export-pdf" class="btn-emerald" type="button">Export PDF</button>
           <button id="export-image" class="btn-warning" type="button">Export Image</button>
           <button id="download-json" class="btn-gray-700" type="button">Backup JSON</button>
-          <button id="clear-storage" class="btn-danger-500" type="button">Clear My Data</button>
+          <button id="clear-storage" class="btn-danger-500 hidden" type="button">Clear My Data</button>
         </div>
 
         <section id="admin-panel" class="card admin-panel hidden">
@@ -198,13 +191,26 @@
           </div>
 
           <div class="admin-layout">
-            <form id="admin-create-user-form" class="admin-form">
-              <h3>Add User</h3>
-              <input id="admin-user-name" class="input-field" type="text" placeholder="Full name" required />
-              <input id="admin-user-email" class="input-field" type="email" placeholder="Email address" required />
-              <input id="admin-user-password" class="input-field" type="password" placeholder="Temporary password" required />
-              <button class="btn btn-primary" type="submit">Create User</button>
-            </form>
+            <div class="admin-form-stack">
+              <form id="admin-create-user-form" class="admin-form">
+                <h3>Add User</h3>
+                <input id="admin-user-name" class="input-field" type="text" placeholder="Full name" required />
+                <input id="admin-user-email" class="input-field" type="email" placeholder="Email address" required />
+                <input id="admin-user-password" class="input-field" type="password" placeholder="Temporary password" required />
+                <button class="btn btn-primary" type="submit">Create User</button>
+              </form>
+
+              <form id="admin-assign-worker-form" class="admin-form">
+                <h3>Assign Worker To Users</h3>
+                <p class="inline-note">Select one or more users, then add or update a worker in their database.</p>
+                <div id="admin-worker-user-list" class="admin-user-select-grid"></div>
+                <input id="admin-assign-worker-id" class="input-field" type="text" placeholder="Worker ID / PID" required />
+                <input id="admin-assign-worker-name" class="input-field" type="text" placeholder="Full name" required />
+                <input id="admin-assign-worker-position" class="input-field" type="text" placeholder="Position" />
+                <input id="admin-assign-worker-hours" class="input-field" type="number" min="0" step="0.5" placeholder="Hours" />
+                <button class="btn btn-success" type="submit">Add / Update Worker For Selected Users</button>
+              </form>
+            </div>
 
             <div class="admin-users">
               <div class="table-wrapper">
@@ -230,6 +236,47 @@
     <footer class="app-footer">
       Managed by Durgesh Kushwaha
     </footer>
+  </div>
+
+  <div id="worker-modal" class="modal hidden" aria-hidden="true">
+    <div class="modal-backdrop" data-close-worker-modal="true"></div>
+    <div class="modal-card worker-modal-card" role="dialog" aria-modal="true" aria-labelledby="worker-modal-title">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow">Worker Control</p>
+          <h2 id="worker-modal-title">Add Or Modify Worker</h2>
+          <p id="worker-modal-copy" class="modal-copy">Choose add or modify, then manage the worker inside this popup.</p>
+        </div>
+        <button id="close-worker-modal" class="modal-close" type="button" aria-label="Close worker dialog">×</button>
+      </div>
+
+      <div class="worker-mode-toggle" role="tablist" aria-label="Worker action">
+        <button id="worker-mode-add" class="mode-chip active" type="button">Add Worker</button>
+        <button id="worker-mode-modify" class="mode-chip" type="button">Modify Worker</button>
+      </div>
+
+      <div id="worker-modify-picker" class="input-stack hidden">
+        <label class="field-label" for="worker-modal-select">Select Worker</label>
+        <select id="worker-modal-select" class="input-field">
+          <option value="">-- Select a worker to modify --</option>
+        </select>
+      </div>
+
+      <div class="input-stack worker-modal-form">
+        <input id="worker-db-id" type="hidden" />
+        <input id="worker-id" placeholder="Worker ID / PID" class="input-field" />
+        <input id="worker-name" placeholder="Full Name" class="input-field" />
+        <input id="worker-position" placeholder="Position" class="input-field" />
+        <input id="worker-hours" placeholder="Work Hours" type="number" min="0" step="0.5" class="input-field" />
+        <p id="worker-modal-help" class="inline-note">Admins can manage worker records from here.</p>
+      </div>
+
+      <div class="modal-actions worker-modal-actions">
+        <button id="worker-modal-cancel" class="btn btn-secondary btn-auto" type="button">Cancel</button>
+        <button id="delete-worker" class="btn btn-danger-600 btn-auto hidden" type="button">Delete</button>
+        <button id="add-worker" class="btn btn-primary btn-auto" type="button">Save Worker</button>
+      </div>
+    </div>
   </div>
 
   <div id="password-modal" class="modal hidden" aria-hidden="true">
