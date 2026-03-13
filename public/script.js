@@ -1105,12 +1105,12 @@ function drawPdfHeader(doc, options) {
   }
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(17);
+  doc.setFontSize(18);
   doc.setTextColor(0, 0, 0);
   doc.text(title, pageWidth / 2, layout.titleY, { align: "center" });
 
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(11);
+  doc.setFontSize(12);
   doc.text(`Date: ${dateText}`, pageWidth - margins.right, layout.dateY, { align: "right" });
 
   doc.setDrawColor(0, 0, 0);
@@ -1150,10 +1150,10 @@ async function exportPDF() {
     body,
     theme: "grid",
     styles: {
-      fontSize: 10.5,
+      fontSize: 11.25,
       overflow: "ellipsize",
-      cellPadding: { top: 5, right: 5, bottom: 5, left: 5 },
-      minCellHeight: 24,
+      cellPadding: { top: 5.5, right: 5.5, bottom: 5.5, left: 5.5 },
+      minCellHeight: 26,
       valign: "middle",
       textColor: [0, 0, 0],
       fillColor: [255, 255, 255],
@@ -1164,7 +1164,7 @@ async function exportPDF() {
       fillColor: [255, 255, 255],
       textColor: [0, 0, 0],
       fontStyle: "bold",
-      fontSize: 10.5
+      fontSize: 11.5
     },
     columnStyles: {
       0: { cellWidth: 30, halign: "center" },
@@ -1191,7 +1191,7 @@ async function exportPDF() {
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
     doc.setPage(page);
-    doc.setFontSize(10);
+    doc.setFontSize(10.5);
     doc.setTextColor(0, 0, 0);
     doc.text(`Generated on ${dateText}`, margins.left, pageHeight - 20);
     doc.text(`Page ${page} of ${pageCount}`, pageWidth - margins.right, pageHeight - 20, { align: "right" });
@@ -1211,7 +1211,7 @@ async function exportImage() {
 
   const scale = 2;
   const margin = 32;
-  const rowHeight = 36;
+  const rowHeight = 40;
   const footerHeight = 42;
   const columns = [36, 100, 248, 80, 184];
   const tableWidth = columns.reduce((total, value) => total + value, 0);
@@ -1244,12 +1244,12 @@ async function exportImage() {
   }
 
   ctx.fillStyle = "#000000";
-  ctx.font = "700 18px Inter, sans-serif";
+  ctx.font = "700 20px Inter, sans-serif";
   ctx.textAlign = "center";
   ctx.fillText(title, canvasWidth / 2, headerLayout.titleY);
 
   ctx.fillStyle = "#000000";
-  ctx.font = "500 11px Inter, sans-serif";
+  ctx.font = "500 12px Inter, sans-serif";
   ctx.textAlign = "right";
   ctx.fillText(`Date: ${dateText}`, canvasWidth - margin, headerLayout.dateY);
 
@@ -1266,13 +1266,13 @@ async function exportImage() {
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(startX, cursorY, tableWidth, rowHeight);
   ctx.fillStyle = "#000000";
-  ctx.font = "700 13px Inter, sans-serif";
+  ctx.font = "700 14px Inter, sans-serif";
   ctx.textAlign = "left";
 
   const labels = ["#", "PID", "Name", "Hours", "Position"];
   let offsetX = startX;
   labels.forEach((label, index) => {
-    ctx.fillText(label, offsetX + 10, cursorY + 22);
+    ctx.fillText(label, offsetX + 10, cursorY + 24);
     offsetX += columns[index];
   });
 
@@ -1292,10 +1292,10 @@ async function exportImage() {
 
     let valueX = startX;
     values.forEach((value, columnIndex) => {
-      ctx.font = isPermanentExportCell(worker, columnIndex) ? "700 12px Inter, sans-serif" : "500 12px Inter, sans-serif";
+      ctx.font = isPermanentExportCell(worker, columnIndex) ? "700 13px Inter, sans-serif" : "500 13px Inter, sans-serif";
       const maxWidth = columns[columnIndex] - 18;
       const fitted = fitCanvasText(ctx, value, maxWidth);
-      ctx.fillText(fitted, valueX + 10, cursorY + 22);
+      ctx.fillText(fitted, valueX + 10, cursorY + 24);
       valueX += columns[columnIndex];
     });
 
@@ -1324,7 +1324,7 @@ async function exportImage() {
   ctx.stroke();
 
   ctx.fillStyle = "#000000";
-  ctx.font = "500 11px Inter, sans-serif";
+  ctx.font = "500 12px Inter, sans-serif";
   ctx.textAlign = "left";
   ctx.fillText(`Generated on ${dateText}`, margin, canvasHeight - 18);
 
