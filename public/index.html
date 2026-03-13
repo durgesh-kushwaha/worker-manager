@@ -94,7 +94,7 @@
 
         <div id="worker-management-section" class="form-section hidden">
           <h2>Worker Management</h2>
-          <p class="section-copy">Open one popup to add a worker or modify an existing worker.</p>
+          <p class="section-copy">Open one popup to add or modify workers in your own account only.</p>
           <button id="open-worker-modal" class="btn btn-primary" type="button">Add / Modify Worker</button>
         </div>
 
@@ -131,7 +131,7 @@
             <button id="export-csv" class="btn btn-indigo" type="button">Export CSV</button>
             <div id="csv-import-wrap" class="input-stack hidden">
               <input id="import-csv" type="file" accept=".csv,text/csv,text/plain,*/*" class="input-field file-input" />
-              <p class="inline-note">Admin only: import or update worker records in the database.</p>
+              <p class="inline-note">Import or update worker records in your own account database.</p>
             </div>
           </div>
         </div>
@@ -268,7 +268,7 @@
         <input id="worker-name" placeholder="Full Name" class="input-field" />
         <input id="worker-position" placeholder="Position" class="input-field" />
         <input id="worker-hours" placeholder="Work Hours" type="number" min="0" step="0.5" class="input-field" />
-        <p id="worker-modal-help" class="inline-note">Admins can manage worker records from here.</p>
+        <p id="worker-modal-help" class="inline-note">Add or modify worker records for your account only.</p>
       </div>
 
       <div class="modal-actions worker-modal-actions">
@@ -315,6 +315,6 @@
     </div>
   </div>
 
-  <script src="script.js" defer></script>
+  <script src="script.js?v=20260313-1" defer></script>
 </body>
 </html>

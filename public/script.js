@@ -101,14 +101,6 @@ function getWorkerById(workerId) {
   return state.workers.find((worker) => worker._id === workerId) || null;
 }
 
-function pinPermanentWorkerFirst(workers = []) {
-  const permanentWorker = workers.find((worker) => worker.isPermanent);
-  if (!permanentWorker) {
-    return workers;
-  }
-  return [permanentWorker, ...workers.filter((worker) => worker._id !== permanentWorker._id)];
-}
-
 function clearPasswordModalFields() {
   el("password-modal-form").reset();
 }
@@ -155,17 +147,18 @@ function clearWorkerForm() {
 function updateWorkerFormInteractivity() {
   const selectedWorker = getWorkerById(safeText(el("worker-db-id").value).trim());
   const isLockedPermanent = Boolean(selectedWorker?.isPermanent && state.workerDialog.mode === "modify");
+  const canDeleteWorker = false;
 
   el("worker-id").disabled = isLockedPermanent;
   el("worker-name").disabled = isLockedPermanent;
   el("worker-position").disabled = isLockedPermanent;
-  el("delete-worker").classList.toggle("hidden", state.workerDialog.mode !== "modify" || isLockedPermanent || !selectedWorker);
+  el("delete-worker").classList.toggle("hidden", state.workerDialog.mode !== "modify" || isLockedPermanent || !selectedWorker || !canDeleteWorker);
   el("add-worker").textContent = state.workerDialog.mode === "modify" ? "Update Worker" : "Add Worker";
   el("worker-modal-help").textContent = isLockedPermanent
     ? "Kanhaiya is the permanent default worker. Only hours can be changed and he cannot be deleted."
     : state.workerDialog.mode === "modify"
-      ? "Modify the selected worker record. Changes are saved everywhere for this user."
-      : "Add a new worker record to the database.";
+      ? "Modify the selected worker record in your account only."
+      : "Add a new worker record to your account.";
 }
 
 function fillWorkerForm(worker) {
@@ -225,11 +218,6 @@ function closeWorkerModal() {
 }
 
 function openWorkerModal(options = {}) {
-  if (!isAdminUser()) {
-    setStatus("Only admins can change worker records.", true);
-    return;
-  }
-
   const { mode = "add", workerId = "" } = options;
   el("worker-modal").classList.remove("hidden");
   el("worker-modal").setAttribute("aria-hidden", "false");
@@ -268,9 +256,9 @@ function setCurrentUser(user) {
   el("account-email").textContent = state.currentUser.email;
   el("nav-user-role").classList.toggle("role-admin", isAdmin);
   el("admin-panel").classList.toggle("hidden", !isAdmin);
-  el("worker-management-section").classList.toggle("hidden", !isAdmin);
-  el("bulk-hours-section").classList.toggle("hidden", !isAdmin);
-  el("csv-import-wrap").classList.toggle("hidden", !isAdmin);
+  el("worker-management-section").classList.toggle("hidden", false);
+  el("bulk-hours-section").classList.toggle("hidden", false);
+  el("csv-import-wrap").classList.toggle("hidden", false);
   el("clear-storage").classList.toggle("hidden", !isAdmin);
   renderLogo();
 }
@@ -388,11 +376,9 @@ function renderWorkerModalPicker() {
 }
 
 function getSelectedWorkers() {
-  return pinPermanentWorkerFirst(
-    state.selectedWorkerIds
+  return state.selectedWorkerIds
     .map((id) => state.workers.find((worker) => worker._id === id))
-    .filter(Boolean)
-  );
+    .filter(Boolean);
 }
 
 function renderSelectedTable() {
@@ -420,8 +406,6 @@ function renderSelectedTable() {
     });
   }
 
-  rows = pinPermanentWorkerFirst(rows);
-
   if (!rows.length) {
     tbody.innerHTML = '<tr class="empty-row"><td colspan="5" class="empty-state">No selected workers for this report date.</td></tr>';
     return;
@@ -429,8 +413,8 @@ function renderSelectedTable() {
 
   tbody.innerHTML = rows
     .map((worker) => {
-      const showManageButton = isAdminUser();
-      const showRemoveButton = !worker.isPermanent;
+      const showManageButton = true;
+      const showRemoveButton = true;
       const actionContent = showManageButton || showRemoveButton
         ? `
             <div class="action-group">
@@ -442,11 +426,11 @@ function renderSelectedTable() {
               ${
                 showRemoveButton
                   ? `<button class="remove-btn" type="button" data-remove-id="${worker._id}">Remove</button>`
-                  : `<span class="inline-note permanent-note">Default worker is pinned</span>`
+                  : ""
               }
             </div>
           `
-        : '<span class="inline-note permanent-note">Default worker is pinned</span>';
+        : "";
 
       return `
         <tr class="${worker.isPermanent ? "permanent-row" : ""}">
@@ -730,11 +714,6 @@ function handleLogout() {
 }
 
 async function addOrUpdateWorker() {
-  if (!isAdminUser()) {
-    setStatus("Only admins can change worker records.", true);
-    return;
-  }
-
   const workerDbId = safeText(el("worker-db-id").value).trim();
   const payload = {
     workerId: el("worker-id").value.trim(),
@@ -772,31 +751,7 @@ async function addOrUpdateWorker() {
 }
 
 async function deleteWorker() {
-  if (!isAdminUser()) {
-    setStatus("Only admins can delete worker records.", true);
-    return;
-  }
-
-  const workerDbId = safeText(el("worker-db-id").value).trim();
-  const workerCode = el("worker-id").value.trim();
-  const worker = workerDbId
-    ? state.workers.find((item) => item._id === workerDbId)
-    : state.workers.find((item) => item.workerId === workerCode);
-
-  if (!worker) {
-    setStatus("Enter or load a worker before deleting.", true);
-    return;
-  }
-
-  try {
-    await apiRequest(`/api/workers/${worker._id}`, { method: "DELETE" });
-    clearWorkerForm();
-    await refreshAppData({ silent: true });
-    closeWorkerModal();
-    setStatus("Worker deleted.");
-  } catch (error) {
-    setStatus(error.message, true);
-  }
+  setStatus("Worker database deletion is disabled. Remove workers from the selected list instead.", true);
 }
 
 async function addToSelected() {
@@ -821,7 +776,7 @@ async function clearSelected() {
   state.selectedWorkerIds = [];
   await saveReportSelection([], { silent: true });
   renderSelectedTable();
-  setStatus("Report list cleared. The default worker stayed pinned.");
+  setStatus("Report list cleared.");
 }
 
 async function addAllWorkersToSelected() {
@@ -839,11 +794,6 @@ async function addAllWorkersToSelected() {
 }
 
 async function updateBulkHours(mode) {
-  if (!isAdminUser()) {
-    setStatus("Only admins can change worker hours in bulk.", true);
-    return;
-  }
-
   const onlySelected = el("bulk-only-selected").checked;
   const selectedIds = onlySelected ? [...state.selectedWorkerIds] : [];
 
@@ -940,12 +890,6 @@ function parseCsvLine(line, delimiter) {
 }
 
 async function importCSV(event) {
-  if (!isAdminUser()) {
-    event.target.value = "";
-    setStatus("Only admins can import worker records.", true);
-    return;
-  }
-
   const file = event.target.files?.[0];
   if (!file) {
     return;
