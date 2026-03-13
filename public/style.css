@@ -1347,10 +1347,13 @@ a {
   }
 
   .worker-mode-toggle,
-  .input-group,
-  .export-buttons-group,
   .table-tools {
     grid-template-columns: 1fr;
+  }
+
+  .input-group,
+  .export-buttons-group {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .btn,
